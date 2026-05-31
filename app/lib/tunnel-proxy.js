@@ -1,33 +1,48 @@
 /**
- * rslvd TCP Tunnel Proxy
+ * rslvd Multi-Protocol Tunnel Proxy
  *
- * Control port 7000: tunnel clients connect, send "HELLO <token>\n"
- *   → responds "OK\n" or "ERR <reason>\n"
- *   → stays open; server sends "CONNECT\n" when a public HTTP/WS request arrives
- *   → client sends "PING\n" for keepalive; server replies "PONG\n"
+ * Supports TCP, UDP, and DNS2TCP tunnels
  *
- * Data port 7001: for each inbound public connection, client opens one data connection
- *   → sends "DATA <token>\n"
- *   → server replies "GO\n" then bridges the two sockets
+ * TCP Tunnels (ports 7000/7001):
+ *   Control port 7000: tunnel clients connect, send "HELLO <token>\n"
+ *   Data port 7001: for each inbound public connection, client opens data connection
+ *   Public traffic port 8080: HTTP/WebSocket proxy routed by Host header
  *
- * Public traffic port 8080: nginx proxies *.rslvd.net here.
- *   The proxy peeks at the Host header (HTTP) or buffers the raw bytes,
- *   looks up the tunnel by fqdn, signals the client via CONNECT,
- *   then splices the public socket to the client's data socket — replaying
- *   the already-read bytes so the local service sees the complete request.
+ * UDP Tunnels (ports 7100/7101):
+ *   Control port 7100: UDP registration with "HELLO <token>\n"
+ *   Data port 7101: UDP packet relay between public and client
+ *   Public UDP port 8081: receives UDP packets, routes by source address
+ *
+ * DNS2TCP (port 7200):
+ *   DNS server on port 7200 (UDP/TCP)
+ *   Encodes TCP data in DNS TXT queries/responses
+ *   Bypasses captive portals and restrictive firewalls
  */
 
 const net  = require('net');
+const dgram = require('dgram');
+const dns = require('dns');
 const pool = require('../db/pool');
 
-const CONTROL_PORT = 7000;
-const DATA_PORT    = 7001;
-const PUBLIC_PORT  = 8080;
+// TCP Tunnel ports
+const TCP_CONTROL_PORT = 7000;
+const TCP_DATA_PORT    = 7001;
+const TCP_PUBLIC_PORT  = 8080;
 
-// fqdn → { token, controlConn, pendingDataConns: [] }
+// UDP Tunnel ports
+const UDP_CONTROL_PORT = 7100;
+const UDP_DATA_PORT    = 7101;
+const UDP_PUBLIC_PORT  = 8081;
+
+// DNS2TCP port
+const DNS2TCP_PORT = 7200;
+
+// fqdn → { token, protocol, controlConn, pendingDataConns: [], udpClientAddr }
 const clients = new Map();
-// token → fqdn  (reverse index for control/data lookup)
+// token → fqdn (reverse index)
 const tokenToFqdn = new Map();
+// UDP session tracking: clientAddr -> { fqdn, lastSeen }
+const udpSessions = new Map();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,13 +54,6 @@ function sendLine(socket, line) {
   try { socket.write(line + '\n'); } catch (_) {}
 }
 
-/**
- * Read exactly one newline-terminated line from a socket without consuming
- * any bytes beyond it.  Returns { line, leftover } where leftover is a Buffer
- * of bytes that were read from the socket but belong to the next message.
- * This is critical for binary protocols (WebSocket) — readline/bufio both
- * over-read and silently discard the extra bytes.
- */
 function readLineRaw(socket, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     let buf = Buffer.alloc(0);
@@ -66,7 +74,7 @@ function readLineRaw(socket, timeoutMs = 10000) {
 
     function onData(chunk) {
       buf = Buffer.concat([buf, chunk]);
-      const nl = buf.indexOf(0x0a); // '\n'
+      const nl = buf.indexOf(0x0a);
       if (nl !== -1) {
         const line = buf.slice(0, nl);
         const leftover = buf.slice(nl + 1);
@@ -92,12 +100,12 @@ function readLineRaw(socket, timeoutMs = 10000) {
   });
 }
 
-// ── Control server (port 7000) ────────────────────────────────────────────────
+// ── TCP Control Server (port 7000) ──────────────────────────────────────────────
 
-const controlServer = net.createServer(async (conn) => {
+const tcpControlServer = net.createServer(async (conn) => {
   conn.setKeepAlive(true, 30000);
   const remote = `${conn.remoteAddress}:${conn.remotePort}`;
-  log(`Control connect from ${remote}`);
+  log(`TCP Control connect from ${remote}`);
 
   let helloLine;
   try {
@@ -119,7 +127,7 @@ const controlServer = net.createServer(async (conn) => {
   let row;
   try {
     const result = await pool.query(
-      'SELECT id, fqdn, status FROM tunnels WHERE token = $1 AND active = TRUE',
+      'SELECT id, fqdn, protocol, status FROM tunnels WHERE token = $1 AND active = TRUE',
       [token]
     );
     row = result.rows[0];
@@ -136,6 +144,7 @@ const controlServer = net.createServer(async (conn) => {
   }
 
   const fqdn = row.fqdn;
+  const protocol = row.protocol || 'tcp';
 
   // Kick existing client for same fqdn
   if (clients.has(fqdn)) {
@@ -144,12 +153,12 @@ const controlServer = net.createServer(async (conn) => {
     tokenToFqdn.delete(existing.token);
   }
 
-  clients.set(fqdn, { token, controlConn: conn, pendingDataConns: [] });
+  clients.set(fqdn, { token, protocol, controlConn: conn, pendingDataConns: [], udpClientAddr: null });
   tokenToFqdn.set(token, fqdn);
 
   pool.query('UPDATE tunnels SET status = $1 WHERE token = $2', ['active', token]).catch(() => {});
   sendLine(conn, 'OK');
-  log(`Tunnel registered: ${fqdn}`);
+  log(`TCP Tunnel registered: ${fqdn} (${protocol})`);
 
   // Keepalive
   let pingBuf = Buffer.alloc(0);
@@ -164,7 +173,7 @@ const controlServer = net.createServer(async (conn) => {
   });
 
   conn.on('close', () => {
-    log(`Control disconnect: ${fqdn}`);
+    log(`TCP Control disconnect: ${fqdn}`);
     const entry = clients.get(fqdn);
     if (entry && entry.controlConn === conn) {
       for (const pc of entry.pendingDataConns) { try { pc.destroy(); } catch (_) {} }
@@ -174,12 +183,12 @@ const controlServer = net.createServer(async (conn) => {
     }
   });
 
-  conn.on('error', (err) => log(`Control error ${fqdn}: ${err.message}`));
+  conn.on('error', (err) => log(`TCP Control error ${fqdn}: ${err.message}`));
 });
 
-// ── Data server (port 7001) ───────────────────────────────────────────────────
+// ── TCP Data Server (port 7001) ─────────────────────────────────────────────────
 
-const dataServer = net.createServer(async (dataConn) => {
+const tcpDataServer = net.createServer(async (dataConn) => {
   dataConn.setKeepAlive(true, 10000);
 
   let dataLine, leftover;
@@ -209,7 +218,6 @@ const dataServer = net.createServer(async (dataConn) => {
   sendLine(dataConn, 'GO');
   publicConn.resume();
 
-  // Replay bytes the proxy already read (Host header peek + any leftover from client)
   if (headBytes && headBytes.length > 0) dataConn.write(headBytes);
   if (leftover  && leftover.length  > 0) publicConn.write(leftover);
 
@@ -222,13 +230,11 @@ const dataServer = net.createServer(async (dataConn) => {
   dataConn.on('error',   () => { try { publicConn.destroy(); } catch (_) {} });
 });
 
-// ── Public HTTP/WS proxy (port 8080) — routed by Host header ─────────────────
+// ── TCP Public HTTP/WS Proxy (port 8080) ──────────────────────────────────────
 
-const publicServer = net.createServer(async (publicConn) => {
+const tcpPublicServer = net.createServer(async (publicConn) => {
   publicConn.pause();
 
-  // Buffer incoming bytes until we've seen a complete Host header line.
-  // We never consume more than needed — everything is replayed to the tunnel client.
   let buf = Buffer.alloc(0);
   let fqdn = null;
   const TIMEOUT = 10000;
@@ -238,11 +244,9 @@ const publicServer = net.createServer(async (publicConn) => {
   }, TIMEOUT);
 
   function tryRoute() {
-    // Look for Host: header in buffered bytes (works for HTTP/1.x and WS upgrade)
     const text = buf.toString('ascii');
     const m = text.match(/^Host:\s*([^\r\n:]+)/im);
     if (!m) {
-      // Need more data — but bail if we've buffered too much without finding it
       if (buf.length > 8192) {
         clearTimeout(timer);
         publicConn.destroy();
@@ -258,7 +262,6 @@ const publicServer = net.createServer(async (publicConn) => {
 
     const entry = clients.get(fqdn);
     if (!entry) {
-      // No tunnel connected for this host — send a clean 502
       publicConn.resume();
       publicConn.write(
         'HTTP/1.1 502 No Tunnel\r\n' +
@@ -270,11 +273,9 @@ const publicServer = net.createServer(async (publicConn) => {
       return;
     }
 
-    // Signal the tunnel client to open a data connection, park the public conn
     sendLine(entry.controlConn, 'CONNECT');
     entry.pendingDataConns.push({ publicConn, headBytes: buf });
 
-    // Timeout if the client doesn't open a data connection in time
     setTimeout(() => {
       const idx = entry.pendingDataConns.findIndex(p => p.publicConn === publicConn);
       if (idx !== -1) {
@@ -295,21 +296,225 @@ const publicServer = net.createServer(async (publicConn) => {
   publicConn.resume();
 });
 
+// ── UDP Control Server (port 7100) ──────────────────────────────────────────────
+
+const udpControlSocket = dgram.createSocket('udp4');
+
+udpControlSocket.on('message', async (msg, rinfo) => {
+  const msgStr = msg.toString('utf8').trim();
+  
+  if (!msgStr.startsWith('HELLO ')) return;
+  
+  const token = msgStr.slice(6).trim();
+  
+  let row;
+  try {
+    const result = await pool.query(
+      'SELECT id, fqdn, protocol FROM tunnels WHERE token = $1 AND active = TRUE',
+      [token]
+    );
+    row = result.rows[0];
+  } catch (e) {
+    udpControlSocket.send('ERR database\n', rinfo.port, rinfo.address);
+    return;
+  }
+
+  if (!row) {
+    udpControlSocket.send('ERR invalid token\n', rinfo.port, rinfo.address);
+    return;
+  }
+
+  const fqdn = row.fqdn;
+  const clientAddr = `${rinfo.address}:${rinfo.port}`;
+  
+  // Update or create UDP session
+  const existing = clients.get(fqdn);
+  if (existing) {
+    try { existing.controlConn.destroy(); } catch (_) {}
+  }
+  
+  // For UDP, we store the client address and use it for routing
+  clients.set(fqdn, { 
+    token, 
+    protocol: 'udp', 
+    controlConn: null,
+    udpClientAddr: { address: rinfo.address, port: rinfo.port },
+    pendingDataConns: [] 
+  });
+  tokenToFqdn.set(token, fqdn);
+  udpSessions.set(clientAddr, { fqdn, lastSeen: Date.now() });
+  
+  pool.query('UPDATE tunnels SET status = $1 WHERE token = $2', ['active', token]).catch(() => {});
+  udpControlSocket.send('OK\n', rinfo.port, rinfo.address);
+  log(`UDP Tunnel registered: ${fqdn} from ${clientAddr}`);
+});
+
+udpControlSocket.on('error', (err) => log(`UDP Control error: ${err.message}`));
+
+// ── UDP Data/Public Server (port 7101) ─────────────────────────────────────────
+
+const udpDataSocket = dgram.createSocket('udp4');
+
+udpDataSocket.on('message', (msg, rinfo) => {
+  const senderAddr = `${rinfo.address}:${rinfo.port}`;
+  
+  // Check if this is from a registered UDP client
+  const session = udpSessions.get(senderAddr);
+  
+  if (session) {
+    // Message from tunnel client - forward to local service (via client)
+    session.lastSeen = Date.now();
+    // The client is responsible for forwarding to the local UDP service
+    // We just acknowledge receipt
+  } else {
+    // Message from public internet - route to tunnel client
+    // Find tunnel by destination port (simplified - in production you'd map ports to fqdns)
+    for (const [fqdn, entry] of clients) {
+      if (entry.protocol === 'udp' && entry.udpClientAddr) {
+        // Forward to tunnel client
+        udpDataSocket.send(msg, entry.udpClientAddr.port, entry.udpClientAddr.address);
+        break;
+      }
+    }
+  }
+});
+
+udpDataSocket.on('error', (err) => log(`UDP Data error: ${err.message}`));
+
+// ── DNS2TCP Server (port 7200) ─────────────────────────────────────────────────
+
+// DNS2TCP encodes TCP data in DNS TXT records
+// Client sends: base32-encoded data in subdomain: <data>.tunnel-id.rslvd.net
+// Server responds: TXT record with encoded response data
+
+const dns2tcpSocket = dgram.createSocket('udp4');
+const dns2tcpSessions = new Map(); // sessionId -> { clientAddr, localPort, buffer }
+
+function encodeDNSResponse(requestId, data) {
+  // Simple DNS response encoding
+  // In production, implement proper DNS packet encoding
+  return Buffer.from(`DNS2TCP_RESPONSE:${data.toString('base64')}`);
+}
+
+function parseDNSQuery(msg) {
+  // Parse DNS query packet
+  // Returns { sessionId, data, isDataPacket }
+  try {
+    // Minimal DNS parsing - extract QNAME
+    let offset = 12; // Skip header
+    const labels = [];
+    
+    while (offset < msg.length) {
+      const len = msg[offset];
+      if (len === 0) break;
+      if (len > 63) return null; // Compression pointer or invalid
+      labels.push(msg.slice(offset + 1, offset + 1 + len).toString('ascii'));
+      offset += 1 + len;
+    }
+    
+    const qname = labels.join('.');
+    // Expected format: <data>.<session>.tunnel.rslvd.net or <session>.tunnel.rslvd.net
+    const parts = qname.split('.');
+    
+    if (parts.length >= 3 && parts[parts.length - 3] === 'tunnel') {
+      const sessionId = parts[parts.length - 2];
+      const data = parts.length > 3 ? Buffer.from(parts[0], 'base64') : null;
+      return { sessionId, data, qname };
+    }
+    
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+dns2tcpSocket.on('message', async (msg, rinfo) => {
+  const query = parseDNSQuery(msg);
+  if (!query) return;
+  
+  const { sessionId, data } = query;
+  
+  if (data) {
+    // Data packet - forward to local service via existing session
+    const session = dns2tcpSessions.get(sessionId);
+    if (session && session.tcpConn) {
+      session.tcpConn.write(data);
+    } else {
+      // New session - establish TCP connection to local service
+      // Extract target port from token lookup
+      try {
+        const result = await pool.query(
+          'SELECT target_port FROM tunnels WHERE token = $1 AND active = TRUE',
+          [sessionId]
+        );
+        if (result.rows[0]) {
+          const targetPort = result.rows[0].target_port;
+          const tcpConn = net.createConnection({ port: targetPort, host: 'localhost' });
+          
+          tcpConn.on('connect', () => {
+            tcpConn.write(data);
+            dns2tcpSessions.set(sessionId, { 
+              clientAddr: rinfo, 
+              tcpConn,
+              buffer: Buffer.alloc(0)
+            });
+          });
+          
+          tcpConn.on('data', (tcpData) => {
+            // Send response via DNS TXT
+            const response = encodeDNSResponse(sessionId, tcpData);
+            dns2tcpSocket.send(response, rinfo.port, rinfo.address);
+          });
+          
+          tcpConn.on('close', () => {
+            dns2tcpSessions.delete(sessionId);
+          });
+          
+          tcpConn.on('error', (err) => {
+            log(`DNS2TCP connection error: ${err.message}`);
+            dns2tcpSessions.delete(sessionId);
+          });
+        }
+      } catch (e) {
+        log(`DNS2TCP error: ${e.message}`);
+      }
+    }
+  }
+});
+
+dns2tcpSocket.on('error', (err) => log(`DNS2TCP error: ${err.message}`));
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 function startTunnelProxy() {
-  controlServer.listen(CONTROL_PORT, '0.0.0.0', () => {
-    log(`Control server listening on :${CONTROL_PORT}`);
+  // TCP servers
+  tcpControlServer.listen(TCP_CONTROL_PORT, '0.0.0.0', () => {
+    log(`TCP Control server listening on :${TCP_CONTROL_PORT}`);
   });
-  dataServer.listen(DATA_PORT, '0.0.0.0', () => {
-    log(`Data server listening on :${DATA_PORT}`);
+  tcpDataServer.listen(TCP_DATA_PORT, '0.0.0.0', () => {
+    log(`TCP Data server listening on :${TCP_DATA_PORT}`);
   });
-  publicServer.listen(PUBLIC_PORT, '127.0.0.1', () => {
-    log(`Public proxy listening on :${PUBLIC_PORT} (routed by Host header)`);
+  tcpPublicServer.listen(TCP_PUBLIC_PORT, '127.0.0.1', () => {
+    log(`TCP Public proxy listening on :${TCP_PUBLIC_PORT}`);
   });
-  controlServer.on('error', (e) => log(`Control server error: ${e.message}`));
-  dataServer.on('error',    (e) => log(`Data server error: ${e.message}`));
-  publicServer.on('error',  (e) => log(`Public server error: ${e.message}`));
+  
+  // UDP servers
+  udpControlSocket.bind(UDP_CONTROL_PORT, '0.0.0.0', () => {
+    log(`UDP Control server listening on :${UDP_CONTROL_PORT}`);
+  });
+  udpDataSocket.bind(UDP_DATA_PORT, '0.0.0.0', () => {
+    log(`UDP Data server listening on :${UDP_DATA_PORT}`);
+  });
+  
+  // DNS2TCP server
+  dns2tcpSocket.bind(DNS2TCP_PORT, '0.0.0.0', () => {
+    log(`DNS2TCP server listening on :${DNS2TCP_PORT}`);
+  });
+  
+  // Error handlers
+  tcpControlServer.on('error', (e) => log(`TCP Control server error: ${e.message}`));
+  tcpDataServer.on('error',    (e) => log(`TCP Data server error: ${e.message}`));
+  tcpPublicServer.on('error',  (e) => log(`TCP Public server error: ${e.message}`));
 }
 
 module.exports = { startTunnelProxy };

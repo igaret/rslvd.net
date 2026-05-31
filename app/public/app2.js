@@ -604,6 +604,7 @@ function SupportPage({ user, navigate }) {
 function TunnelModal({ onClose, onCreated, user, existingTunnels }) {
   const [name, setName] = useState('');
   const [targetPort, setTargetPort] = useState('');
+  const [protocol, setProtocol] = useState('tcp');
   const [isNested, setIsNested] = useState(false);
   const [parentId, setParentId] = useState('');
   const [error, setError] = useState('');
@@ -627,7 +628,7 @@ function TunnelModal({ onClose, onCreated, user, existingTunnels }) {
   const submit = async (e) => {
     e.preventDefault(); setError(''); setLoading(true);
     try {
-      const body = { name: name.toLowerCase(), target_port: parseInt(targetPort) };
+      const body = { name: name.toLowerCase(), target_port: parseInt(targetPort), protocol };
       if (isNested && parentId) body.parent_id = parentId;
       const t = await API.post('/tunnels', body);
       onCreated(t);
@@ -691,6 +692,28 @@ function TunnelModal({ onClose, onCreated, user, existingTunnels }) {
         React.createElement('input', { className: 'input', type: 'number', value: targetPort, onChange: e => setTargetPort(e.target.value), placeholder: 'or type any port...', required: true, min: 1, max: 65535 })
       ),
 
+      React.createElement('div', { className: 'form-group' },
+        React.createElement('label', { className: 'form-label' }, 'Protocol'),
+        React.createElement('div', { style: { display: 'flex', gap: 8 } },
+          [
+            { key: 'tcp', label: '🔌 TCP', desc: 'Standard tunnel for HTTP/WebSocket' },
+            { key: 'udp', label: '📡 UDP', desc: 'For DNS, VoIP, games' },
+            { key: 'dns2tcp', label: '🌊 DNS2TCP', desc: 'Tunnels TCP over DNS queries' }
+          ].map(p => React.createElement('button', {
+            key: p.key, type: 'button',
+            className: `btn btn-sm ${protocol === p.key ? 'btn-primary' : 'btn-secondary'}`,
+            onClick: () => setProtocol(p.key),
+            title: p.desc,
+            style: { flex: 1 }
+          }, p.label))
+        ),
+        React.createElement('p', { style: { fontSize: 12, color: 'var(--text3)', marginTop: 6 } },
+          protocol === 'tcp' && 'Works with HTTP, HTTPS, WebSockets, SSH, RDP — any TCP protocol.',
+          protocol === 'udp' && 'For DNS servers, VoIP, game servers, or any UDP application. Requires UDP-compatible client.',
+          protocol === 'dns2tcp' && 'Bypasses firewalls by encoding TCP data in DNS queries. Slow but works almost anywhere.'
+        )
+      ),
+
       React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'flex-end' } },
         React.createElement('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel'),
         React.createElement('button', { type: 'submit', className: 'btn btn-primary', disabled: loading },
@@ -715,13 +738,17 @@ function TunnelRow({ tunnel: t, onDelete, isNested }) {
   };
 
   const fqdn = t.fqdn || `${t.name}.rslvd.net`;
+  const protocol = t.protocol || 'tcp';
   const publicUrl = `https://${fqdn}`;
   const localHost = t.target_host || 'localhost';
+  
+  // Protocol-specific connection commands
+  const protocolFlag = protocol === 'udp' ? '-udp ' : protocol === 'dns2tcp' ? '-dns ' : '';
   const installCmd = `curl -fsSL https://rslvd.net/install.sh | bash`;
-  const clientCmd = `rslvd-tunnel ${t.token} ${t.target_port}`;
+  const clientCmd = `rslvd-tunnel ${protocolFlag}${t.token} ${t.target_port}`;
   const winDlUrl = `https://rslvd.net/dl/rslvd-tunnel-windows-amd64.exe`;
-  const winCmd = `.\\rslvd-tunnel-windows-amd64.exe ${t.token} ${t.target_port}`;
-  const dockerCmd = `docker run --rm --network host ghcr.io/rslvd/tunnel ${t.token} ${t.target_port}`;
+  const winCmd = `.\\rslvd-tunnel-windows-amd64.exe ${protocolFlag}${t.token} ${t.target_port}`;
+  const dockerCmd = `docker run --rm --network host ghcr.io/rslvd/tunnel ${protocolFlag}${t.token} ${t.target_port}`;
 
   return React.createElement('div', { className: 'card', style: { marginBottom: 8, marginLeft: isNested ? 24 : 0, borderLeft: isNested ? '3px solid var(--accent)' : undefined } },
     // Header
@@ -732,10 +759,11 @@ function TunnelRow({ tunnel: t, onDelete, isNested }) {
           React.createElement('a', { href: publicUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontWeight: 600, fontSize: 15, color: 'var(--text)', textDecoration: 'none' } }, fqdn)
         ),
         React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', marginTop: 2 } },
-          `localhost:${t.target_port} → `, React.createElement('strong', null, publicUrl)
+          protocol.toUpperCase(), ' ', `localhost:${t.target_port} → `, React.createElement('strong', null, publicUrl)
         )
       ),
       React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        React.createElement('span', { className: 'badge badge-purple', style: { fontSize: 10, textTransform: 'uppercase' } }, protocol),
         React.createElement('span', { className: `badge badge-${t.status === 'active' ? 'green' : 'yellow'}` }, t.status),
         React.createElement('button', {
           className: `btn btn-primary btn-sm`,

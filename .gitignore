@@ -1,0 +1,8 @@
+secrets.txt
+surf.pem
+.env
+app/.env
+app\.env
+*secret*
+*env*
+*cred*

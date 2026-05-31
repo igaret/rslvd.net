@@ -4,10 +4,10 @@ const stripe = require('../lib/stripe');
 const { requireAuth } = require('../middleware/auth');
 
 const PRICES = {
-  monthly: { id: process.env.STRIPE_PRICE_MONTHLY, label: 'Monthly', amount: '$0.99/mo', maxHosts: 3 },
-  quarterly: { id: process.env.STRIPE_PRICE_QUARTERLY, label: 'Quarterly', amount: '$1.99/3mo', maxHosts: 5 },
-  semi_annual: { id: process.env.STRIPE_PRICE_SEMI_ANNUAL, label: '6 Months', amount: '$4.99/6mo', maxHosts: 10 },
-  annual: { id: process.env.STRIPE_PRICE_ANNUAL, label: 'Annual', amount: '$8.99/yr', maxHosts: 25 },
+  monthly: { id: process.env.STRIPE_PRICE_MONTHLY, label: 'Monthly', amount: '$0.99/mo', maxHosts: 3, maxTunnels: 3 },
+  quarterly: { id: process.env.STRIPE_PRICE_QUARTERLY, label: 'Quarterly', amount: '$1.99/3mo', maxHosts: 5, maxTunnels: 5 },
+  semi_annual: { id: process.env.STRIPE_PRICE_SEMI_ANNUAL, label: '6 Months', amount: '$4.99/6mo', maxHosts: 10, maxTunnels: 10 },
+  annual: { id: process.env.STRIPE_PRICE_ANNUAL, label: 'Annual', amount: '$8.99/yr', maxHosts: 25, maxTunnels: 25 },
 };
 
 // Get plans (public)

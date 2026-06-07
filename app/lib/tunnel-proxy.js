@@ -21,8 +21,23 @@
 
 const net  = require('net');
 const dgram = require('dgram');
-const dns = require('dns');
 const pool = require('../db/pool');
+
+// Base32hex (RFC 4648) decoder — matches Go's base32.HexEncoding used by the tunnel client
+const B32HEX = '0123456789ABCDEFGHIJKLMNOPQRSTUV';
+function decodeBase32Hex(str) {
+  str = str.replace(/=+$/, '').toUpperCase();
+  const out = [];
+  let bits = 0, value = 0;
+  for (const ch of str) {
+    const idx = B32HEX.indexOf(ch);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) { bits -= 8; out.push((value >>> bits) & 0xff); }
+  }
+  return Buffer.from(out);
+}
 
 // TCP Tunnel ports
 const TCP_CONTROL_PORT = 7000;
@@ -418,7 +433,7 @@ function parseDNSQuery(msg) {
     
     if (parts.length >= 3 && parts[parts.length - 3] === 'tunnel') {
       const sessionId = parts[parts.length - 2];
-      const data = parts.length > 3 ? Buffer.from(parts[0], 'base64') : null;
+      const data = parts.length > 3 ? decodeBase32Hex(parts[0]) : null;
       return { sessionId, data, qname };
     }
     

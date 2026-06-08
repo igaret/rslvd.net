@@ -270,6 +270,7 @@ function Landing({ navigate }) {
         React.createElement('a', { href: '#pricing', onClick: e => { e.preventDefault(); document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' }); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Pricing'),
         React.createElement('a', { href: '/login', onClick: e => { e.preventDefault(); navigate('/login'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Login'),
         React.createElement('a', { href: '/register', onClick: e => { e.preventDefault(); navigate('/register'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Register'),
+        React.createElement('a', { href: '/tutorials', onClick: e => { e.preventDefault(); navigate('/tutorials'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Tutorials'),
         React.createElement('a', { href: 'https://rslvd.net/dl/rslvd-tunnel-linux-amd64', style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Downloads'),
         React.createElement('a', { href: '/terms', onClick: e => { e.preventDefault(); navigate('/terms'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Terms'),
         React.createElement('a', { href: '/privacy', onClick: e => { e.preventDefault(); navigate('/privacy'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Privacy')
@@ -1181,7 +1182,10 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
         canAddHost && React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setShowAddHost(true) }, '+ Add hostname')
       ),
       isFree && React.createElement(Alert, { type: 'info' },
-        '🎁 Free plan: 1 subdomain included. Upgrade for more.'
+        '🎁 Free plan: 1 subdomain included. Upgrade for more. ',
+        React.createElement('a', { href: '/tutorials/linux-subdomain', onClick: e => { e.preventDefault(); navigate('/tutorials/linux-subdomain'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🐧 Linux tutorial'),
+        ' · ',
+        React.createElement('a', { href: '/tutorials/windows-subdomain', onClick: e => { e.preventDefault(); navigate('/tutorials/windows-subdomain'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🪟 Windows tutorial')
       ),
       hosts.length === 0
         ? React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 48 } },
@@ -1214,7 +1218,10 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
         canAddTunnel && React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setShowAddTunnel(true) }, '+ New tunnel')
       ),
       React.createElement(Alert, { type: 'info' },
-        '🚇 Tunnels expose any local port to your own subdomain on rslvd.net — no SSH, no port-forwarding. Download the rslvd-tunnel binary and run one command.'
+        '🚇 Tunnels expose any local port to your own subdomain on rslvd.net — no SSH, no port-forwarding. Download the rslvd-tunnel binary and run one command. ',
+        React.createElement('a', { href: '/tutorials/linux-tunnel', onClick: e => { e.preventDefault(); navigate('/tutorials/linux-tunnel'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🐧 Linux tutorial'),
+        ' · ',
+        React.createElement('a', { href: '/tutorials/windows-tunnel', onClick: e => { e.preventDefault(); navigate('/tutorials/windows-tunnel'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🪟 Windows tutorial')
       ),
       tunnels.length === 0
         ? React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 48 } },
@@ -2401,6 +2408,439 @@ function DDNSAutoUpdater({ hosts }) {
   );
 }
 
+// ── Tutorial shared helpers ──────────────────────────────────────────────────
+function TutorialLayout({ title, navigate, children }) {
+  return React.createElement('div', { className: 'page', style: { maxWidth: 800, margin: '0 auto', padding: '32px 24px' } },
+    React.createElement('button', { className: 'btn btn-secondary btn-sm', style: { marginBottom: 24 }, onClick: () => navigate('/') }, '← Back'),
+    React.createElement('h1', { style: { fontSize: 28, marginBottom: 8 } }, title),
+    React.createElement('div', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 32 } },
+      'All tokens and keys shown in screenshots below are ', React.createElement('span', { style: { background: '#ef4444', color: '#fff', padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, letterSpacing: 1 } }, 'REDACTED'), ' for security.'
+    ),
+    children
+  );
+}
+
+function TutorialStep({ num, title, children }) {
+  return React.createElement('div', { style: { display: 'flex', gap: 16, marginBottom: 32 } },
+    React.createElement('div', { style: { width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0, marginTop: 2 } }, num),
+    React.createElement('div', { style: { flex: 1 } },
+      React.createElement('h3', { style: { fontSize: 16, marginBottom: 8 } }, title),
+      children
+    )
+  );
+}
+
+function TutorialScreenshot({ src, alt }) {
+  return React.createElement('img', {
+    src, alt: alt || '',
+    style: { width: '100%', borderRadius: 8, border: '1px solid var(--border)', marginTop: 12, marginBottom: 8 },
+    loading: 'lazy'
+  });
+}
+
+function TutorialNote({ children }) {
+  return React.createElement('div', { style: { background: 'rgba(108,99,255,.08)', border: '1px solid rgba(108,99,255,.2)', borderRadius: 8, padding: '12px 16px', fontSize: 13, color: 'var(--text2)', marginTop: 8, marginBottom: 8 } }, children);
+}
+
+// ── Tutorial: Linux Subdomain Setup ─────────────────────────────────────────
+function TutorialLinuxSubdomain({ navigate }) {
+  return React.createElement(TutorialLayout, { title: '🐧 Linux — Dynamic DNS Subdomain Setup', navigate },
+    React.createElement('p', { style: { color: 'var(--text2)', fontSize: 15, lineHeight: 1.7, marginBottom: 32 } },
+      'This guide walks you through setting up a free rslvd.net subdomain on Linux so your home server is always reachable by name — even when your IP changes. Takes about 2 minutes.'
+    ),
+
+    React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and create your account. The free tier includes 1 subdomain — no credit card needed.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
+    ),
+
+    React.createElement(TutorialStep, { num: '2', title: 'Create a hostname' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'After logging in, go to your Dashboard → Hosts tab and click ', React.createElement('strong', null, '+ Add hostname'), '. Enter your desired subdomain name (e.g. "myserver") and click Create.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/add-host.png', alt: 'Add hostname modal' }),
+      React.createElement(TutorialNote, null, 'Your subdomain will be yourname.rslvd.net — choose something memorable.')
+    ),
+
+    React.createElement(TutorialStep, { num: '3', title: 'Copy your update URL' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Once created, your host card shows a ', React.createElement('strong', null, 'Router DDNS URL'), '. This is the URL you\'ll use to update your IP. Click ', React.createElement('strong', null, 'Copy'), ' to grab it.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/dashboard-hosts.png', alt: 'Dashboard hosts tab with update URL' }),
+      React.createElement(TutorialNote, null,
+        'The URL format is: https://rslvd.net/api/update?key=YOUR_KEY&ip=auto — the "auto" parameter tells the server to detect your public IP automatically.'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '4', title: 'Test the update' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Open a terminal and run the curl command with your update URL to verify it works:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'curl -s "https://rslvd.net/api/update?key=YOUR_UPDATE_KEY&ip=auto"')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'You should see a JSON response confirming the update:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', color: '#3fb950', marginTop: 8 } },
+        React.createElement('code', null, '{"success":true,"ip":"203.0.113.42","fqdn":"myserver.rslvd.net"}')
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/terminal-linux-subdomain.png', alt: 'Terminal showing curl update and cron setup' })
+    ),
+
+    React.createElement(TutorialStep, { num: '5', title: 'Set up automatic updates with cron' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'To keep your subdomain always pointing to your current IP, set up a cron job that runs every 5 minutes:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'crontab -e')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'Add this line at the bottom of your crontab (replace YOUR_UPDATE_KEY with your actual key):'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, '*/5 * * * * curl -s "https://rslvd.net/api/update?key=YOUR_UPDATE_KEY&ip=auto" > /dev/null')
+      ),
+      React.createElement(TutorialNote, null,
+        'This runs every 5 minutes. If your IP changes, it updates within 5 minutes automatically. You can also use systemd timers for more control.'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '6', title: 'Verify and test' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Confirm your cron job is saved:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'crontab -l | grep rslvd')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'Then verify DNS resolution:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'dig +short myserver.rslvd.net')
+      ),
+      React.createElement(TutorialNote, null, 'DNS propagation usually happens within 60 seconds. If it doesn\'t resolve yet, wait a minute and try again.')
+    ),
+
+    React.createElement('div', { style: { marginTop: 40, padding: '20px 24px', background: 'var(--bg3)', borderRadius: 12, textAlign: 'center' } },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 12 } }, 'Done! Your subdomain will now always point to your current IP.'),
+      React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: () => navigate('/tutorials/linux-tunnel') }, 'Next: Set up a tunnel →'),
+        React.createElement('button', { className: 'btn btn-secondary', onClick: () => navigate('/dashboard') }, 'Go to Dashboard')
+      )
+    )
+  );
+}
+
+// ── Tutorial: Windows Subdomain Setup ───────────────────────────────────────
+function TutorialWindowsSubdomain({ navigate }) {
+  return React.createElement(TutorialLayout, { title: '🪟 Windows — Dynamic DNS Subdomain Setup', navigate },
+    React.createElement('p', { style: { color: 'var(--text2)', fontSize: 15, lineHeight: 1.7, marginBottom: 32 } },
+      'This guide walks you through setting up a free rslvd.net subdomain on Windows so your home server is always reachable by name — even when your IP changes. Takes about 2 minutes.'
+    ),
+
+    React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and create your account. The free tier includes 1 subdomain — no credit card needed.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
+    ),
+
+    React.createElement(TutorialStep, { num: '2', title: 'Create a hostname' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'After logging in, go to your Dashboard → Hosts tab and click ', React.createElement('strong', null, '+ Add hostname'), '. Enter your desired subdomain name (e.g. "myserver") and click Create.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/add-host.png', alt: 'Add hostname modal' }),
+      React.createElement(TutorialNote, null, 'Your subdomain will be yourname.rslvd.net — choose something memorable.')
+    ),
+
+    React.createElement(TutorialStep, { num: '3', title: 'Copy your update URL' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Your host card shows a ', React.createElement('strong', null, 'Router DDNS URL'), '. Click ', React.createElement('strong', null, 'Copy'), ' to grab it.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/dashboard-hosts.png', alt: 'Dashboard hosts tab' })
+    ),
+
+    React.createElement(TutorialStep, { num: '4', title: 'Test the update in PowerShell' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Open ', React.createElement('strong', null, 'PowerShell'), ' (right-click Start → Windows PowerShell) and run:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'Invoke-RestMethod "https://rslvd.net/api/update?key=YOUR_UPDATE_KEY&ip=auto"')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'You should see:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', color: '#3fb950', marginTop: 8 } },
+        React.createElement('code', null, 'success : True\nip      : 203.0.113.42\nfqdn    : myserver.rslvd.net')
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/terminal-windows-subdomain.png', alt: 'PowerShell DDNS update' })
+    ),
+
+    React.createElement(TutorialStep, { num: '5', title: 'Set up automatic updates with Task Scheduler' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Run these PowerShell commands ', React.createElement('strong', null, 'as Administrator'), ' to create a scheduled task that updates every 5 minutes:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 12, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8, lineHeight: 1.8 } },
+        React.createElement('code', null,
+          '$action = New-ScheduledTaskAction `\n',
+          '  -Execute "powershell.exe" `\n',
+          '  -Argument \'-Command "Invoke-RestMethod \'\'https://rslvd.net/api/update?key=YOUR_UPDATE_KEY&ip=auto\'\'"\'\n\n',
+          '$trigger = New-ScheduledTaskTrigger `\n',
+          '  -RepetitionInterval (New-TimeSpan -Minutes 5) `\n',
+          '  -Once -At (Get-Date)\n\n',
+          'Register-ScheduledTask -TaskName "rslvd-ddns" `\n',
+          '  -Action $action -Trigger $trigger `\n',
+          '  -Description "Update rslvd.net DDNS"'
+        )
+      ),
+      React.createElement(TutorialNote, null,
+        'Replace YOUR_UPDATE_KEY with the key from your dashboard. The task runs every 5 minutes even when you\'re not logged in.'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '6', title: 'Verify and test' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Verify the scheduled task was created:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'Get-ScheduledTask -TaskName "rslvd-ddns"')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'Test DNS resolution:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'nslookup myserver.rslvd.net')
+      ),
+      React.createElement(TutorialNote, null, 'DNS propagation usually happens within 60 seconds.')
+    ),
+
+    React.createElement('div', { style: { marginTop: 40, padding: '20px 24px', background: 'var(--bg3)', borderRadius: 12, textAlign: 'center' } },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 12 } }, 'Done! Your subdomain will now always point to your current IP.'),
+      React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: () => navigate('/tutorials/windows-tunnel') }, 'Next: Set up a tunnel →'),
+        React.createElement('button', { className: 'btn btn-secondary', onClick: () => navigate('/dashboard') }, 'Go to Dashboard')
+      )
+    )
+  );
+}
+
+// ── Tutorial: Linux Tunnel Setup ────────────────────────────────────────────
+function TutorialLinuxTunnel({ navigate }) {
+  return React.createElement(TutorialLayout, { title: '🐧 Linux — CGNAT Tunnel Setup', navigate },
+    React.createElement('p', { style: { color: 'var(--text2)', fontSize: 15, lineHeight: 1.7, marginBottom: 32 } },
+      'This guide shows you how to expose a local service (like a web server on localhost:3000) to the internet using an rslvd.net tunnel — even if you\'re behind CGNAT or double NAT. Takes about 1 minute.'
+    ),
+
+    React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 1 tunnel — no credit card required.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
+    ),
+
+    React.createElement(TutorialStep, { num: '2', title: 'Create a tunnel' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to Dashboard → Tunnels tab and click ', React.createElement('strong', null, '+ New tunnel'), '. Choose a subdomain name, set the target port (the local port your service runs on, e.g. 3000), and select the protocol (TCP is the default).'
+      ),
+      React.createElement(TutorialNote, null, 'TCP works for HTTP, HTTPS, WebSockets, SSH, and most protocols. Use UDP for game servers or VoIP. Use DNS2TCP only if your network blocks all other traffic.')
+    ),
+
+    React.createElement(TutorialStep, { num: '3', title: 'Install the tunnel client' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Click ', React.createElement('strong', null, '⚡ Connect'), ' on your tunnel card and select the ', React.createElement('strong', null, '🐧 Linux / Mac / Termux'), ' tab. Run the install command:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'curl -fsSL https://rslvd.net/install.sh | bash')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'This downloads the correct binary for your architecture (amd64, arm64, etc.) and installs it to /usr/local/bin.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/dashboard-tunnels-linux.png', alt: 'Tunnel connect panel — Linux tab' })
+    ),
+
+    React.createElement(TutorialStep, { num: '4', title: 'Start the tunnel' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Run the tunnel command shown in your dashboard (Step 2 in the connect panel):'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, 'rslvd-tunnel YOUR_TUNNEL_TOKEN 3000')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'Replace 3000 with whatever port your service runs on. The tunnel auto-reconnects if the connection drops.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/terminal-linux-tunnel.png', alt: 'Terminal showing tunnel running' }),
+      React.createElement(TutorialNote, null,
+        'For UDP services, use: rslvd-tunnel -udp YOUR_TOKEN PORT\n' +
+        'For DNS2TCP mode, use: rslvd-tunnel -dns YOUR_TOKEN PORT'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '5', title: 'Access your service' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Your service is now live at ', React.createElement('strong', null, 'https://yourname.rslvd.net'), '. Open it in any browser from anywhere in the world. All traffic is encrypted via our wildcard SSL certificate.'
+      ),
+      React.createElement(TutorialNote, null, 'The tunnel stays active as long as the rslvd-tunnel process is running. To run it as a background service, see Step 6.')
+    ),
+
+    React.createElement(TutorialStep, { num: '6', title: 'Run on boot (optional)' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Create a systemd service to start the tunnel automatically on boot:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 12, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8, lineHeight: 1.8 } },
+        React.createElement('code', null,
+          'sudo tee /etc/systemd/system/rslvd-tunnel.service << EOF\n' +
+          '[Unit]\n' +
+          'Description=rslvd.net tunnel\n' +
+          'After=network-online.target\n' +
+          'Wants=network-online.target\n\n' +
+          '[Service]\n' +
+          'ExecStart=/usr/local/bin/rslvd-tunnel YOUR_TOKEN 3000\n' +
+          'Restart=always\n' +
+          'RestartSec=5\n\n' +
+          '[Install]\n' +
+          'WantedBy=multi-user.target\n' +
+          'EOF\n\n' +
+          'sudo systemctl enable --now rslvd-tunnel'
+        )
+      ),
+      React.createElement(TutorialNote, null, 'The service auto-restarts if it crashes and starts on every boot.')
+    ),
+
+    React.createElement('div', { style: { marginTop: 40, padding: '20px 24px', background: 'var(--bg3)', borderRadius: 12, textAlign: 'center' } },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 12 } }, 'Your local service is now accessible from anywhere on the internet!'),
+      React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: () => navigate('/tutorials/linux-subdomain') }, '← Subdomain setup'),
+        React.createElement('button', { className: 'btn btn-secondary', onClick: () => navigate('/dashboard') }, 'Go to Dashboard')
+      )
+    )
+  );
+}
+
+// ── Tutorial: Windows Tunnel Setup ──────────────────────────────────────────
+function TutorialWindowsTunnel({ navigate }) {
+  return React.createElement(TutorialLayout, { title: '🪟 Windows — CGNAT Tunnel Setup', navigate },
+    React.createElement('p', { style: { color: 'var(--text2)', fontSize: 15, lineHeight: 1.7, marginBottom: 32 } },
+      'This guide shows you how to expose a local service (like a web server on localhost:3000) to the internet using an rslvd.net tunnel on Windows — even behind CGNAT. Takes about 1 minute.'
+    ),
+
+    React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 1 tunnel — no credit card required.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
+    ),
+
+    React.createElement(TutorialStep, { num: '2', title: 'Create a tunnel' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Go to Dashboard → Tunnels tab and click ', React.createElement('strong', null, '+ New tunnel'), '. Choose a subdomain, set the target port (e.g. 3000), and select TCP protocol.'
+      ),
+      React.createElement(TutorialNote, null, 'TCP works for HTTP, HTTPS, WebSockets, SSH, RDP, and most protocols.')
+    ),
+
+    React.createElement(TutorialStep, { num: '3', title: 'Download the tunnel client' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Click ', React.createElement('strong', null, '⚡ Connect'), ' on your tunnel card and select the ', React.createElement('strong', null, '🪟 Windows'), ' tab. Click the download button to get the .exe file.'
+      ),
+      React.createElement('div', { style: { marginTop: 8 } },
+        React.createElement('a', {
+          href: 'https://rslvd.net/dl/rslvd-tunnel-windows-amd64.exe',
+          className: 'btn btn-secondary btn-sm',
+          style: { display: 'inline-flex', alignItems: 'center', gap: 6 }
+        }, '⬇ Download rslvd-tunnel-windows-amd64.exe')
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/dashboard-tunnels-windows.png', alt: 'Tunnel connect panel — Windows tab' }),
+      React.createElement(TutorialNote, null, 'No installation required — it\'s a single portable .exe file. No dependencies, no admin rights needed.')
+    ),
+
+    React.createElement(TutorialStep, { num: '4', title: 'Run the tunnel' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Open ', React.createElement('strong', null, 'PowerShell'), ' in the folder where you downloaded the file and run:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 13, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8 } },
+        React.createElement('code', null, '.\\rslvd-tunnel-windows-amd64.exe YOUR_TUNNEL_TOKEN 3000')
+      ),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6, marginTop: 8 } },
+        'Replace 3000 with your service\'s port. The tunnel auto-reconnects if the connection drops.'
+      ),
+      React.createElement(TutorialScreenshot, { src: '/img/tutorials/terminal-windows-tunnel.png', alt: 'PowerShell running tunnel' }),
+      React.createElement(TutorialNote, null,
+        'For UDP: .\\rslvd-tunnel-windows-amd64.exe -udp YOUR_TOKEN PORT\n' +
+        'For DNS2TCP: .\\rslvd-tunnel-windows-amd64.exe -dns YOUR_TOKEN PORT'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '5', title: 'Access your service' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'Your service is now live at ', React.createElement('strong', null, 'https://yourname.rslvd.net'), '. Open it in any browser from anywhere. HTTPS is automatic via our wildcard SSL certificate.'
+      )
+    ),
+
+    React.createElement(TutorialStep, { num: '6', title: 'Run on startup (optional)' },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
+        'To auto-start the tunnel when Windows boots, create a scheduled task:'
+      ),
+      React.createElement('div', { className: 'card', style: { fontFamily: 'monospace', fontSize: 12, padding: '12px 16px', background: 'var(--bg3)', marginTop: 8, lineHeight: 1.8 } },
+        React.createElement('code', null,
+          '$action = New-ScheduledTaskAction `\n' +
+          '  -Execute "C:\\path\\to\\rslvd-tunnel-windows-amd64.exe" `\n' +
+          '  -Argument "YOUR_TOKEN 3000"\n\n' +
+          '$trigger = New-ScheduledTaskTrigger -AtStartup\n\n' +
+          'Register-ScheduledTask -TaskName "rslvd-tunnel" `\n' +
+          '  -Action $action -Trigger $trigger `\n' +
+          '  -RunLevel Highest `\n' +
+          '  -Description "rslvd.net tunnel"'
+        )
+      ),
+      React.createElement(TutorialNote, null, 'Replace the path and token with your actual values. The task runs at system startup with elevated privileges.')
+    ),
+
+    React.createElement('div', { style: { marginTop: 40, padding: '20px 24px', background: 'var(--bg3)', borderRadius: 12, textAlign: 'center' } },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 12 } }, 'Your local service is now accessible from anywhere on the internet!'),
+      React.createElement('div', { style: { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: () => navigate('/tutorials/windows-subdomain') }, '← Subdomain setup'),
+        React.createElement('button', { className: 'btn btn-secondary', onClick: () => navigate('/dashboard') }, 'Go to Dashboard')
+      )
+    )
+  );
+}
+
+// ── Tutorials Index ─────────────────────────────────────────────────────────
+function TutorialsPage({ navigate }) {
+  const tutorials = [
+    { path: '/tutorials/linux-subdomain', icon: '🐧', title: 'Linux — Subdomain Setup', desc: 'Set up a free dynamic DNS subdomain on Linux with automatic IP updates via cron.' },
+    { path: '/tutorials/windows-subdomain', icon: '🪟', title: 'Windows — Subdomain Setup', desc: 'Set up a free dynamic DNS subdomain on Windows with automatic IP updates via Task Scheduler.' },
+    { path: '/tutorials/linux-tunnel', icon: '🐧', title: 'Linux — Tunnel Setup', desc: 'Expose a local service to the internet on Linux — even behind CGNAT or double NAT.' },
+    { path: '/tutorials/windows-tunnel', icon: '🪟', title: 'Windows — Tunnel Setup', desc: 'Expose a local service to the internet on Windows — even behind CGNAT or double NAT.' },
+  ];
+
+  return React.createElement('div', { style: { maxWidth: 800, margin: '0 auto', padding: '32px 24px' } },
+    React.createElement('button', { className: 'btn btn-secondary btn-sm', style: { marginBottom: 24 }, onClick: () => navigate('/') }, '← Back'),
+    React.createElement('h1', { style: { fontSize: 28, marginBottom: 8 } }, 'Tutorials'),
+    React.createElement('p', { style: { color: 'var(--text2)', fontSize: 15, marginBottom: 32 } }, 'Step-by-step guides to get up and running with rslvd.net.'),
+    tutorials.map(t =>
+      React.createElement('div', {
+        key: t.path,
+        className: 'card',
+        style: { marginBottom: 12, cursor: 'pointer', transition: 'border-color 0.15s' },
+        onClick: () => navigate(t.path),
+        onMouseEnter: e => e.currentTarget.style.borderColor = 'var(--accent)',
+        onMouseLeave: e => e.currentTarget.style.borderColor = 'var(--border)'
+      },
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          React.createElement('div', { style: { fontSize: 32 } }, t.icon),
+          React.createElement('div', null,
+            React.createElement('h3', { style: { fontSize: 16, marginBottom: 4 } }, t.title),
+            React.createElement('p', { style: { color: 'var(--text2)', fontSize: 13 } }, t.desc)
+          )
+        )
+      )
+    )
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const { path, navigate } = useRoute();
@@ -2428,7 +2868,12 @@ function App() {
       React.createElement(AdminDashboard, { user: auth.user, navigate }),
     path === '/terms'   && React.createElement(TermsPage,   { navigate }),
     path === '/privacy' && React.createElement(PrivacyPage, { navigate }),
-    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password'].includes(path) &&
+    path === '/tutorials' && React.createElement(TutorialsPage, { navigate }),
+    path === '/tutorials/linux-subdomain' && React.createElement(TutorialLinuxSubdomain, { navigate }),
+    path === '/tutorials/windows-subdomain' && React.createElement(TutorialWindowsSubdomain, { navigate }),
+    path === '/tutorials/linux-tunnel' && React.createElement(TutorialLinuxTunnel, { navigate }),
+    path === '/tutorials/windows-tunnel' && React.createElement(TutorialWindowsTunnel, { navigate }),
+    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel'].includes(path) &&
       React.createElement('div', { className: 'flex-center', style: { minHeight: 400, flexDirection: 'column', gap: 16 } },
         React.createElement('h1', null, '404'),
         React.createElement('p', { style: { color: 'var(--text2)' } }, 'Page not found'),

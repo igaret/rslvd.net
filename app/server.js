@@ -24,6 +24,12 @@ app.use('/api/tunnels', require('./routes/tunnels'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/support', require('./routes/support'));
 
+// Public IP detection for PWA DDNS auto-updater
+app.get('/api/ip', (req, res) => {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress;
+  res.json({ ip });
+});
+
 // Serve React frontend
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (req, res) => {

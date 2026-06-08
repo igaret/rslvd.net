@@ -79,7 +79,7 @@ function Modal({ title, onClose, children }) {
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
-function Nav({ user, logout, navigate }) {
+function Nav({ user, logout, navigate, pwa }) {
   const roleBadge = user?.role === 'site_owner'
     ? React.createElement('span', { className: 'badge badge-yellow', style: { fontSize: 11 } }, '★ Owner')
     : user?.role === 'admin'
@@ -99,6 +99,7 @@ function Nav({ user, logout, navigate }) {
         React.createElement('button', { key: 'acct', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/account') }, '⚙️ Account'),
         React.createElement('button', { key: 'out', className: 'btn btn-secondary btn-sm', onClick: () => { logout(); navigate('/'); } }, 'Sign out'),
       ] : [
+        pwa && pwa.canInstall && React.createElement('button', { key: 'install', className: 'btn btn-secondary btn-sm', onClick: pwa.install, style: { gap: 4 } }, 'Install'),
         React.createElement('button', { key: 'in', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/login') }, 'Sign in'),
         React.createElement('button', { key: 'up', className: 'btn btn-primary btn-sm', onClick: () => navigate('/register') }, 'Free signup'),
       ]
@@ -1078,7 +1079,7 @@ function HostCard({ host: h, onDelete, onRegenKey, isNested }) {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({ user, navigate, refreshUser }) {
+function Dashboard({ user, navigate, refreshUser, pwa }) {
   const [hosts, setHosts] = useState([]);
   const [tunnels, setTunnels] = useState([]);
   const [plans, setPlans] = useState([]);
@@ -1134,6 +1135,7 @@ function Dashboard({ user, navigate, refreshUser }) {
 
   return React.createElement('div', { className: 'dashboard' },
     msg && React.createElement(Alert, { type: 'success' }, msg),
+    pwa && pwa.canInstall && React.createElement(InstallBanner, { install: pwa.install }),
 
     React.createElement('div', { className: 'dashboard-header' },
       React.createElement('div', null,
@@ -1201,7 +1203,8 @@ function Dashboard({ user, navigate, refreshUser }) {
       !canAddHost && hosts.length > 0 && React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 24, marginTop: 12 } },
         React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 12 } }, `Hostname limit reached (${user.maxHosts}). Upgrade for more.`),
         React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setTab('billing') }, 'Upgrade')
-      )
+      ),
+      hosts.length > 0 && React.createElement(DDNSAutoUpdater, { hosts })
     ),
 
     // Tunnels tab
@@ -2201,10 +2204,208 @@ function PrivacyPage({ navigate }) {
   );
 }
 
+// ── PWA Install Prompt ──────────────────────────────────────────────────────
+let _deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  window.dispatchEvent(new Event('pwa-installable'));
+});
+
+function useInstallPrompt() {
+  const [canInstall, setCanInstall] = useState(!!_deferredInstallPrompt);
+  const [isInstalled, setIsInstalled] = useState(
+    window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+  );
+  useEffect(() => {
+    const h = () => setCanInstall(true);
+    window.addEventListener('pwa-installable', h);
+    return () => window.removeEventListener('pwa-installable', h);
+  }, []);
+  const install = async () => {
+    if (!_deferredInstallPrompt) return;
+    _deferredInstallPrompt.prompt();
+    const result = await _deferredInstallPrompt.userChoice;
+    if (result.outcome === 'accepted') { setCanInstall(false); setIsInstalled(true); }
+    _deferredInstallPrompt = null;
+  };
+  return { canInstall, isInstalled, install };
+}
+
+function InstallBanner({ install }) {
+  const [dismissed, setDismissed] = useState(localStorage.getItem('pwa-banner-dismissed') === '1');
+  if (dismissed) return null;
+  const dismiss = () => { localStorage.setItem('pwa-banner-dismissed', '1'); setDismissed(true); };
+  return React.createElement('div', {
+    style: { background: 'var(--accent-bg)', border: '1px solid var(--accent)', borderRadius: 12, padding: '16px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }
+  },
+    React.createElement('div', null,
+      React.createElement('div', { style: { fontWeight: 600, fontSize: 15, marginBottom: 2 } }, 'Install rslvd.net'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)' } }, 'Get the app on your device — manage DNS & tunnels offline, auto-update your IP in the background.')
+    ),
+    React.createElement('div', { style: { display: 'flex', gap: 8 } },
+      React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: install }, 'Install app'),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: dismiss, style: { padding: '6px 10px' } }, '×')
+    )
+  );
+}
+
+// ── DDNS Auto-Updater ──────────────────────────────────────────────────────
+function DDNSAutoUpdater({ hosts }) {
+  const [enabled, setEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ddns-auto-update') || 'false'); } catch { return false; }
+  });
+  const [selectedHosts, setSelectedHosts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ddns-auto-hosts') || '[]'); } catch { return []; }
+  });
+  const [lastIp, setLastIp] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [updating, setUpdating] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const hostsWithKey = hosts.filter(h => h.update_key);
+
+  // Listen for SW messages
+  useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    const handler = (e) => {
+      if (e.data?.type === 'ddns-updated') {
+        setLastIp(e.data.ip);
+        setLastUpdate(new Date().toLocaleTimeString());
+        setStatus('Updated via background sync');
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    return () => navigator.serviceWorker.removeEventListener('message', handler);
+  }, []);
+
+  // Save config to localStorage + SW IndexedDB
+  useEffect(() => {
+    localStorage.setItem('ddns-auto-update', JSON.stringify(enabled));
+    localStorage.setItem('ddns-auto-hosts', JSON.stringify(selectedHosts));
+
+    // Update SW config
+    if (navigator.serviceWorker?.controller) {
+      const config = {
+        hosts: selectedHosts.map(id => {
+          const h = hosts.find(x => x.id === id);
+          return h ? { id: h.id, fqdn: h.fqdn, updateKey: h.update_key, enabled: true, lastIp: null } : null;
+        }).filter(Boolean)
+      };
+      // Write to IndexedDB for SW access
+      const req = indexedDB.open('rslvd-sw', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => {
+        const db = req.result;
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(config, 'ddns-config');
+      };
+    }
+
+    // Register periodic background sync if supported
+    if (enabled && navigator.serviceWorker?.ready) {
+      navigator.serviceWorker.ready.then(reg => {
+        if (reg.periodicSync) {
+          reg.periodicSync.register('ddns-update', { minInterval: 15 * 60 * 1000 }).catch(() => {});
+        }
+      });
+    }
+  }, [enabled, selectedHosts]);
+
+  const toggleHost = (id) => {
+    setSelectedHosts(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const updateNow = async () => {
+    if (selectedHosts.length === 0) return;
+    setUpdating(true); setStatus('');
+    try {
+      const ipRes = await fetch('/api/ip');
+      if (!ipRes.ok) throw new Error('Could not detect IP');
+      const { ip } = await ipRes.json();
+      setLastIp(ip);
+
+      let updated = 0;
+      for (const id of selectedHosts) {
+        const h = hosts.find(x => x.id === id);
+        if (!h?.update_key) continue;
+        const res = await fetch(`/api/update?key=${encodeURIComponent(h.update_key)}&ip=${encodeURIComponent(ip)}`);
+        if (res.ok) updated++;
+      }
+      setLastUpdate(new Date().toLocaleTimeString());
+      setStatus(`Updated ${updated} host(s) to ${ip}`);
+    } catch (err) {
+      setStatus(`Error: ${err.message}`);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  if (hostsWithKey.length === 0) return null;
+
+  return React.createElement('div', { className: 'card', style: { marginBottom: 24 } },
+    React.createElement('div', { className: 'flex-between', style: { marginBottom: 16 } },
+      React.createElement('div', null,
+        React.createElement('h3', { style: { fontSize: 16, marginBottom: 4 } }, 'DDNS Auto-Updater'),
+        React.createElement('p', { style: { fontSize: 13, color: 'var(--text2)' } },
+          'Keep your subdomains pointed at this device\'s IP — works in the background when the app is installed.'
+        )
+      ),
+      React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' } },
+        React.createElement('input', {
+          type: 'checkbox', checked: enabled,
+          onChange: () => setEnabled(!enabled),
+          style: { width: 18, height: 18, accentColor: 'var(--accent)' }
+        }),
+        React.createElement('span', { style: { fontSize: 13, fontWeight: 500 } }, enabled ? 'Enabled' : 'Disabled')
+      )
+    ),
+
+    enabled && React.createElement('div', null,
+      React.createElement('div', { style: { fontSize: 13, fontWeight: 500, color: 'var(--text2)', marginBottom: 8 } }, 'Select hosts to auto-update:'),
+      React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 } },
+        hostsWithKey.map(h => React.createElement('label', {
+          key: h.id,
+          style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: selectedHosts.includes(h.id) ? 'var(--accent-bg)' : 'var(--bg3)', borderRadius: 8, cursor: 'pointer', border: '1px solid', borderColor: selectedHosts.includes(h.id) ? 'var(--accent)' : 'var(--border)' }
+        },
+          React.createElement('input', {
+            type: 'checkbox', checked: selectedHosts.includes(h.id),
+            onChange: () => toggleHost(h.id),
+            style: { width: 16, height: 16, accentColor: 'var(--accent)' }
+          }),
+          React.createElement('span', { style: { fontSize: 14, fontWeight: 500 } }, h.fqdn),
+          h.ip_address && React.createElement('span', { style: { fontSize: 12, color: 'var(--text3)', marginLeft: 'auto' } }, h.ip_address)
+        ))
+      ),
+
+      React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        React.createElement('button', {
+          className: 'btn btn-primary btn-sm',
+          onClick: updateNow,
+          disabled: updating || selectedHosts.length === 0
+        }, updating ? React.createElement(Spinner) : 'Update now'),
+        lastIp && React.createElement('span', { style: { fontSize: 12, color: 'var(--text3)' } },
+          `IP: ${lastIp}`, lastUpdate && ` (${lastUpdate})`
+        )
+      ),
+
+      status && React.createElement('div', {
+        style: { marginTop: 8, fontSize: 12, color: status.startsWith('Error') ? 'var(--red)' : 'var(--green)' }
+      }, status),
+
+      !window.matchMedia('(display-mode: standalone)').matches &&
+        React.createElement('p', { style: { fontSize: 12, color: 'var(--text3)', marginTop: 12, fontStyle: 'italic' } },
+          'Tip: Install this app for automatic background updates even when the browser is closed.'
+        )
+    )
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const { path, navigate } = useRoute();
   const auth = useAuth();
+  const pwa = useInstallPrompt();
   window.navigate = navigate;
 
   if (auth.loading) return React.createElement('div', { className: 'flex-center', style: { minHeight: '100vh' } }, React.createElement(Spinner));
@@ -2214,14 +2415,14 @@ function App() {
   if ((path === '/login' || path === '/register') && auth.user) { navigate('/dashboard'); return null; }
 
   return React.createElement('div', null,
-    React.createElement(Nav, { user: auth.user, logout: auth.logout, navigate }),
+    React.createElement(Nav, { user: auth.user, logout: auth.logout, navigate, pwa }),
     path === '/' && React.createElement(Landing, { navigate }),
     path === '/pricing' && React.createElement(Landing, { navigate }),
     path === '/login' && React.createElement(AuthPage, { mode: 'login', login: auth.login, navigate }),
     path === '/register' && React.createElement(AuthPage, { mode: 'register', register: auth.register, navigate }),
     path === '/forgot-password' && React.createElement(ForgotPasswordPage, { navigate }),
     path === '/reset-password' && React.createElement(ResetPasswordPage, { navigate }),
-    path === '/dashboard' && auth.user && React.createElement(Dashboard, { user: auth.user, navigate, refreshUser: auth.refreshUser }),
+    path === '/dashboard' && auth.user && React.createElement(Dashboard, { user: auth.user, navigate, refreshUser: auth.refreshUser, pwa }),
     path === '/account' && auth.user && React.createElement(AccountPage, { user: auth.user, navigate, refreshUser: auth.refreshUser }),
     path === '/admin' && auth.user && (auth.user.role === 'admin' || auth.user.role === 'site_owner') &&
       React.createElement(AdminDashboard, { user: auth.user, navigate }),

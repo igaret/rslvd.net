@@ -1,0 +1,19 @@
+[Unit]
+Description=rslvd.net Dynamic DNS Service
+After=network.target postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=rslvd
+WorkingDirectory=/opt/rslvd
+ExecStart=/usr/bin/node /opt/rslvd/server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/rslvd/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rslvd
+
+[Install]
+WantedBy=multi-user.target

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/base32"
 	"fmt"
 	"io"
@@ -27,7 +26,7 @@ const (
 	dns2tcpPort      = "7200"
 	
 	reconnectWait = 5 * time.Second
-	version       = "1.1.0"
+	version       = "1.2.0"
 )
 
 type TunnelMode string
@@ -213,22 +212,22 @@ func runTCPTunnel(token, localPort string) error {
 
 func runUDPTunnel(token, localPort string) error {
 	log("Connecting UDP tunnel to rslvd.net...")
-	
+
 	serverIP, err := resolveHost(serverHost)
 	if err != nil {
 		return err
 	}
-	
+
 	// Control socket for registration
 	controlConn, err := net.Dial("udp", serverIP+":"+udpControlPort)
 	if err != nil {
 		return fmt.Errorf("cannot connect UDP control: %w", err)
 	}
 	defer controlConn.Close()
-	
+
 	// Send registration
 	controlConn.Write([]byte("HELLO " + token + "\n"))
-	
+
 	// Wait for OK
 	buf := make([]byte, 1024)
 	controlConn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -236,64 +235,93 @@ func runUDPTunnel(token, localPort string) error {
 	if err != nil {
 		return fmt.Errorf("registration timeout: %w", err)
 	}
-	
+
 	response := strings.TrimSpace(string(buf[:n]))
 	if !strings.HasPrefix(response, "OK") {
 		return fmt.Errorf("registration failed: %s", response)
 	}
-	
+
 	log("✓ UDP Tunnel registered!")
 	log("  Local UDP: localhost:%s", localPort)
-	
+
 	// Data socket for packet relay
 	dataConn, err := net.Dial("udp", serverIP+":"+udpDataPort)
 	if err != nil {
 		return fmt.Errorf("cannot connect UDP data: %w", err)
 	}
 	defer dataConn.Close()
-	
-	// Local UDP socket
+
+	// Authenticate on data port
+	dataConn.Write([]byte("DATA " + token + "\n"))
+
+	// Wait for GO
+	dataConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err = dataConn.Read(buf)
+	if err != nil {
+		return fmt.Errorf("data port auth timeout: %w", err)
+	}
+	dataResp := strings.TrimSpace(string(buf[:n]))
+	if dataResp != "GO" {
+		return fmt.Errorf("data port auth failed: %s", dataResp)
+	}
+	dataConn.SetReadDeadline(time.Time{})
+
+	log("  Data channel ready")
+
+	// Local UDP address
 	localAddr, err := net.ResolveUDPAddr("udp", "localhost:"+localPort)
 	if err != nil {
 		return fmt.Errorf("cannot resolve local address: %w", err)
 	}
-	
-	localConn, err := net.DialUDP("udp", nil, localAddr)
-	if err != nil {
-		return fmt.Errorf("cannot connect to local service: %w", err)
-	}
-	defer localConn.Close()
-	
-	// Relay packets: server -> local
+
+	// Relay packets: server -> local -> server
+	// Server sends framed packets: [4 bytes sender IP][2 bytes sender port][payload]
+	// We strip the header, forward to local, then prepend the header to the response
 	go func() {
-		buf := make([]byte, 65535)
+		recvBuf := make([]byte, 65535)
 		for {
-			n, err := dataConn.Read(buf)
+			n, err := dataConn.Read(recvBuf)
 			if err != nil {
 				log("UDP server read error: %v", err)
 				return
 			}
-			localConn.Write(buf[:n])
-		}
-	}()
-	
-	// Relay packets: local -> server
-	go func() {
-		buf := make([]byte, 65535)
-		for {
-			n, err := localConn.Read(buf)
-			if err != nil {
-				log("UDP local read error: %v", err)
-				return
+			if n < 7 {
+				continue
 			}
-			dataConn.Write(buf[:n])
+
+			// Extract sender header (6 bytes) and payload
+			header := make([]byte, 6)
+			copy(header, recvBuf[:6])
+			payload := recvBuf[6:n]
+
+			// Forward payload to local service
+			localConn, err := net.DialUDP("udp", nil, localAddr)
+			if err != nil {
+				log("Cannot reach localhost:%s: %v", localPort, err)
+				continue
+			}
+
+			localConn.Write(payload)
+
+			// Read response from local service (with timeout)
+			localConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			respBuf := make([]byte, 65535)
+			rn, err := localConn.Read(respBuf)
+			localConn.Close()
+			if err != nil {
+				continue
+			}
+
+			// Send response back to server with sender header prepended
+			framed := append(header, respBuf[:rn]...)
+			dataConn.Write(framed)
 		}
 	}()
-	
-	// Keepalive
+
+	// Keepalive on control socket
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ticker.C:
@@ -303,67 +331,79 @@ func runUDPTunnel(token, localPort string) error {
 }
 
 // ==================== DNS2TCP TUNNEL ====================
+//
+// DNS2TCP reverse tunnel protocol:
+//   Client → Server: DNS query with QNAME = <base32data>.<token>.tunnel.rslvd.net
+//   Server → Client: [txId 2B][type 1B][payload...]
+//     type 0x00 = NOOP (no pending data)
+//     type 0x01 = DATA (rest is [connId 2B][tcp data...])
+//     type 0x02 = CONNECT (new public connection [connId 2B])
+//     type 0x03 = CLOSE (public connection closed [connId 2B])
+//
+// Client sends response data with: [connId 2B][payload...] encoded in DNS query
+
+const (
+	dnsNoop    = 0x00
+	dnsData    = 0x01
+	dnsConnect = 0x02
+	dnsClose   = 0x03
+)
 
 // encodeDataToDNS encodes binary data into DNS-safe base32 subdomain
 func encodeDataToDNS(data []byte) string {
-	return base32.HexEncoding.EncodeToString(data)
+	return base32.HexEncoding.WithPadding(base32.NoPadding).EncodeToString(data)
 }
 
-// decodeDNSResponse decodes DNS TXT response data
-func decodeDNSResponse(data []byte) ([]byte, error) {
-	// Parse: DNS2TCP_RESPONSE:<base64data>
-	prefix := "DNS2TCP_RESPONSE:"
-	str := string(data)
-	if !strings.HasPrefix(str, prefix) {
-		return nil, fmt.Errorf("invalid response format")
-	}
-	return base64.StdEncoding.DecodeString(str[len(prefix):])
-}
-
-// buildDNSQuery builds a DNS query packet for DNS2TCP
-func buildDNSQuery(sessionID string, data []byte) []byte {
-	// Build query name: <data>.<session>.tunnel.rslvd.net
+// buildDNSQuery builds a DNS query packet with optional data payload
+func buildDNSQuery(token string, txId uint16, data []byte) []byte {
+	// Build query name: [<data>.]<token>.tunnel.rslvd.net
 	var qname string
 	if data != nil && len(data) > 0 {
 		encoded := encodeDataToDNS(data)
-		qname = encoded + "." + sessionID + ".tunnel." + serverHost
+		// Split into 63-char labels (DNS label max length)
+		var labels []string
+		for len(encoded) > 63 {
+			labels = append(labels, encoded[:63])
+			encoded = encoded[63:]
+		}
+		if len(encoded) > 0 {
+			labels = append(labels, encoded)
+		}
+		qname = strings.Join(labels, ".") + "." + token + ".tunnel." + serverHost
 	} else {
-		qname = sessionID + ".tunnel." + serverHost
+		qname = token + ".tunnel." + serverHost
 	}
-	
-	// Build DNS query packet (simplified)
-	// In production, use a proper DNS library
+
 	buf := make([]byte, 512)
-	
+
 	// Transaction ID
-	buf[0] = 0x12
-	buf[1] = 0x34
-	
+	buf[0] = byte(txId >> 8)
+	buf[1] = byte(txId & 0xff)
+
 	// Flags: Standard query
 	buf[2] = 0x01
 	buf[3] = 0x00
-	
+
 	// Questions: 1
 	buf[4] = 0x00
 	buf[5] = 0x01
-	
-	// Answer RRs: 0
+
+	// Answer/Authority/Additional RRs: 0
 	buf[6] = 0x00
 	buf[7] = 0x00
-	
-	// Authority RRs: 0
 	buf[8] = 0x00
 	buf[9] = 0x00
-	
-	// Additional RRs: 0
 	buf[10] = 0x00
 	buf[11] = 0x00
-	
+
 	offset := 12
-	
+
 	// QNAME labels
 	labels := strings.Split(qname, ".")
 	for _, label := range labels {
+		if len(label) > 63 {
+			label = label[:63]
+		}
 		buf[offset] = byte(len(label))
 		offset++
 		copy(buf[offset:], label)
@@ -371,49 +411,68 @@ func buildDNSQuery(sessionID string, data []byte) []byte {
 	}
 	buf[offset] = 0x00
 	offset++
-	
+
 	// QTYPE: TXT (16)
 	buf[offset] = 0x00
 	buf[offset+1] = 0x10
 	offset += 2
-	
+
 	// QCLASS: IN (1)
 	buf[offset] = 0x00
 	buf[offset+1] = 0x01
 	offset += 2
-	
+
 	return buf[:offset]
 }
 
 func runDNS2TCPTunnel(token, localPort string) error {
 	log("Connecting DNS2TCP tunnel to rslvd.net...")
-	log("Note: DNS2TCP has limited bandwidth due to DNS packet size constraints")
-	
+	log("Note: DNS2TCP has limited bandwidth (~500 B/poll, latency depends on poll rate)")
+
 	serverIP, err := resolveHost(serverHost)
 	if err != nil {
 		return err
 	}
-	
+
 	// DNS socket
 	dnsConn, err := net.Dial("udp", serverIP+":"+dns2tcpPort)
 	if err != nil {
 		return fmt.Errorf("cannot connect DNS2TCP server: %w", err)
 	}
 	defer dnsConn.Close()
-	
+
+	// Register with initial poll (no data)
+	var txCounter uint16
+	query := buildDNSQuery(token, txCounter, nil)
+	txCounter++
+	dnsConn.Write(query)
+
+	// Wait for response to confirm registration
+	regBuf := make([]byte, 1024)
+	dnsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	n, err := dnsConn.Read(regBuf)
+	if err != nil {
+		return fmt.Errorf("registration timeout: %w", err)
+	}
+	if n < 3 {
+		return fmt.Errorf("invalid registration response")
+	}
+	dnsConn.SetReadDeadline(time.Time{})
+
 	log("✓ DNS2TCP Tunnel active!")
 	log("  Local TCP: localhost:%s", localPort)
-	log("  Session:   %s", token)
-	
-	// Connection to local service
-	var localConn net.Conn
-	var connectErr error
-	
-	// Session state
-	sessionActive := false
-	buffer := make([]byte, 0)
-	
-	// Poll loop for DNS responses
+	log("  (Polling server for connections...)")
+
+	// Local connections: connId -> net.Conn
+	localConns := make(map[uint16]net.Conn)
+	sendCh := make(chan []byte, 64) // Data to send to server: [connId 2B][payload...]
+
+	// Poll loop — sends queries and processes responses
+	pollInterval := 250 * time.Millisecond
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Response reader goroutine
 	go func() {
 		buf := make([]byte, 65535)
 		for {
@@ -424,65 +483,100 @@ func runDNS2TCPTunnel(token, localPort string) error {
 					continue
 				}
 				log("DNS read error: %v", err)
+				return
+			}
+			if n < 3 {
 				continue
 			}
-			
-			data, err := decodeDNSResponse(buf[:n])
-			if err != nil {
-				continue
-			}
-			
-			if localConn != nil {
-				localConn.Write(data)
-			} else {
-				buffer = append(buffer, data...)
+
+			// Parse response: [txId 2B][type 1B][payload...]
+			msgType := buf[2]
+			payload := buf[3:n]
+
+			switch msgType {
+			case dnsNoop:
+				// Nothing pending
+
+			case dnsConnect:
+				// New public connection: payload = [connId 2B]
+				if len(payload) < 2 {
+					continue
+				}
+				connId := uint16(payload[0])<<8 | uint16(payload[1])
+				// Connect to local service
+				lc, err := net.DialTimeout("tcp", "localhost:"+localPort, 5*time.Second)
+				if err != nil {
+					log("Cannot connect to localhost:%s for conn %d: %v", localPort, connId, err)
+					continue
+				}
+				localConns[connId] = lc
+				log("  New connection #%d → localhost:%s", connId, localPort)
+
+				// Read from local and queue for sending
+				go func(id uint16, conn net.Conn) {
+					readBuf := make([]byte, 200) // Small chunks for DNS
+					for {
+						rn, err := conn.Read(readBuf)
+						if err != nil {
+							delete(localConns, id)
+							conn.Close()
+							return
+						}
+						// Prepend connId
+						msg := make([]byte, 2+rn)
+						msg[0] = byte(id >> 8)
+						msg[1] = byte(id & 0xff)
+						copy(msg[2:], readBuf[:rn])
+						sendCh <- msg
+					}
+				}(connId, lc)
+
+			case dnsData:
+				// Data from public connection: payload = [connId 2B][data...]
+				if len(payload) < 3 {
+					continue
+				}
+				connId := uint16(payload[0])<<8 | uint16(payload[1])
+				data := payload[2:]
+				if lc, ok := localConns[connId]; ok {
+					lc.Write(data)
+				}
+
+			case dnsClose:
+				// Public connection closed: payload = [connId 2B]
+				if len(payload) < 2 {
+					continue
+				}
+				connId := uint16(payload[0])<<8 | uint16(payload[1])
+				if lc, ok := localConns[connId]; ok {
+					lc.Close()
+					delete(localConns, connId)
+				}
 			}
 		}
 	}()
-	
-	// Send keepalive/ping every 10 seconds
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	
+
+	// Main loop: poll and send queued data
 	for {
 		select {
 		case <-ticker.C:
-			// Send empty query as keepalive
-			query := buildDNSQuery(token, nil)
-			dnsConn.Write(query)
-			
-			// Try to connect to local service if not connected
-			if !sessionActive {
-				localConn, connectErr = net.Dial("tcp", "localhost:"+localPort)
-				if connectErr == nil {
-					sessionActive = true
-					log("Connected to local service on port %s", localPort)
-					
-					// Flush buffered data
-					if len(buffer) > 0 {
-						localConn.Write(buffer)
-						buffer = nil
-					}
-					
-					// Handle local -> server
-					go func() {
-						buf := make([]byte, 200) // Small chunks for DNS
-						for {
-							n, err := localConn.Read(buf)
-							if err != nil {
-								log("Local connection closed: %v", err)
-								sessionActive = false
-								localConn = nil
-								return
-							}
-							
-							// Send data via DNS query
-							query := buildDNSQuery(token, buf[:n])
-							dnsConn.Write(query)
-						}
-					}()
-				}
+			// Send poll or queued data
+			select {
+			case data := <-sendCh:
+				query := buildDNSQuery(token, txCounter, data)
+				txCounter++
+				dnsConn.Write(query)
+			default:
+				// Empty poll
+				query := buildDNSQuery(token, txCounter, nil)
+				txCounter++
+				dnsConn.Write(query)
 			}
+		case data := <-sendCh:
+			// Data ready to send — send immediately
+			query := buildDNSQuery(token, txCounter, data)
+			txCounter++
+			dnsConn.Write(query)
 		}
 	}
 }

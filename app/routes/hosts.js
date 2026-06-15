@@ -5,6 +5,7 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
+const ssl = require('../lib/ssl');
 
 const PLAN_LIMITS = {
   free: 2,
@@ -87,6 +88,9 @@ router.post('/', async (req, res) => {
         [user.id, hostname, fqdn, updateKey, parent_id]
       );
 
+      // Provision SSL cert for nested subdomain (async, non-blocking)
+      ssl.provisionCert(fqdn).catch(e => console.error('SSL provision failed:', e.message));
+
       activity.log('host.create', { userId: user.id, detail: fqdn, req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
     }
@@ -149,6 +153,11 @@ router.delete('/:id', async (req, res) => {
       if (host.ionos_record_id_v6) await ionos.removeRecord(host.ionos_record_id_v6);
     } catch (e) {
       console.error('IONOS delete error:', e.message);
+    }
+
+    // Remove SSL cert config for nested subdomains
+    if (ssl.isNestedSubdomain(host.fqdn)) {
+      ssl.removeCertConfig(host.fqdn);
     }
 
     await pool.query('DELETE FROM hosts WHERE id = $1', [req.params.id]);

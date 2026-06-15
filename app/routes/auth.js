@@ -33,7 +33,7 @@ router.post('/register', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
-       VALUES ($1, $2, $3, 'free', 1, 1, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
+       VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
       [email.toLowerCase(), hash, stripeCustomerId]
     );
 

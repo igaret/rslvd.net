@@ -7,12 +7,12 @@ const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
 
 const PLAN_LIMITS = {
-  free: 1,
+  free: 2,
   none: 0,
-  monthly: 3,
-  quarterly: 5,
-  semi_annual: 10,
-  annual: 25,
+  monthly: 4,
+  quarterly: 12,
+  semi_annual: 24,
+  annual: 999999,
 };
 
 router.use(requireAuth);

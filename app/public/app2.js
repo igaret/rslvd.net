@@ -110,10 +110,11 @@ function Nav({ user, logout, navigate, pwa }) {
 // ── Landing ───────────────────────────────────────────────────────────────────
 function Landing({ navigate }) {
   const plans = [
-    { key: 'free',       name: 'Free',     price: '$0',    period: 'forever',    hosts: 1,  tunnels: 1,  highlight: false },
-    { key: 'monthly',    name: 'Monthly',  price: '$0.99', period: '/month',      hosts: 3,  tunnels: 3,  highlight: false },
-    { key: 'semi_annual',name: '6 Months', price: '$4.99', period: '/6 months',   hosts: 10, tunnels: 10, highlight: true  },
-    { key: 'annual',     name: 'Annual',   price: '$8.99', period: '/year',       hosts: 25, tunnels: 25, highlight: false },
+    { key: 'free',       name: 'Free',      price: '$0',    period: 'forever',    hosts: 2,  tunnels: 2,  highlight: false },
+    { key: 'monthly',    name: 'Monthly',   price: '$0.99', period: '/month',     hosts: 4,  tunnels: 4,  highlight: false },
+    { key: 'quarterly',  name: 'Quarterly', price: '$1.99', period: '/3 months',  hosts: 12, tunnels: 12, highlight: false },
+    { key: 'semi_annual',name: '6 Months',  price: '$4.99', period: '/6 months',  hosts: 24, tunnels: 24, highlight: true  },
+    { key: 'annual',     name: 'Annual',    price: '$8.99', period: '/year',       hosts: 'Unlimited', tunnels: 'Unlimited', highlight: false },
   ];
 
   const features = [
@@ -138,7 +139,7 @@ function Landing({ navigate }) {
     { q: 'What is CGNAT?', a: 'Carrier-Grade NAT is when your ISP shares a single public IP across many customers. Port forwarding doesn\'t work because you don\'t actually own the public IP. Our tunnel bypasses this entirely.' },
     { q: 'How is this different from ngrok?', a: 'rslvd.net gives you a permanent subdomain (not a random URL), supports WebSockets, works on routers and Android, has no session time limits, and costs a fraction of the price.' },
     { q: 'Does the tunnel support HTTPS?', a: 'Yes. All tunnels are served over HTTPS via *.rslvd.net — our wildcard SSL certificate covers every subdomain. Your traffic is encrypted end-to-end from browser to server.' },
-    { q: 'Can I run multiple tunnels?', a: 'Yes. Free tier gets 1 tunnel. Paid plans scale up to 25. Each tunnel gets its own subdomain and token.' },
+    { q: 'Can I run multiple tunnels?', a: 'Yes. Free tier gets 2 tunnels. Paid plans scale up to unlimited. Each tunnel gets its own subdomain and token.' },
     { q: 'Does it work on OpenWRT / DD-WRT?', a: 'Yes — dedicated one-line installers for both. Auto-detects your router\'s architecture (MIPS, ARM, x86) and persistent storage location.' },
   ];
 
@@ -149,7 +150,7 @@ function Landing({ navigate }) {
     // ── Hero ──────────────────────────────────────────────────────────────────
     React.createElement('div', { className: 'hero' },
       React.createElement('div', { style: { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 16px', background: 'var(--accent-bg)', border: '1px solid rgba(108,99,255,0.3)', borderRadius: 999, fontSize: 13, color: 'var(--accent2)', marginBottom: 24 } },
-        '⚡ Free tier — no credit card required'
+        '⚡ Free tier — 2 hosts + 2 tunnels, no credit card required'
       ),
       React.createElement('h1', null,
         'Your home server,\n',
@@ -260,7 +261,7 @@ function Landing({ navigate }) {
     // ── Bottom CTA ────────────────────────────────────────────────────────────
     React.createElement('div', { style: { textAlign: 'center', padding: '80px 24px', background: 'radial-gradient(ellipse 60% 60% at 50% 100%, rgba(108,99,255,0.12), transparent)' } },
       React.createElement('h2', { style: { fontSize: 32, marginBottom: 12 } }, 'Ready to get online?'),
-      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 16, marginBottom: 32 } }, 'Free forever for 1 host + 1 tunnel. No credit card. Live in under a minute.'),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 16, marginBottom: 32 } }, 'Free forever for 2 hosts + 2 tunnels. No credit card. Live in under a minute.'),
       React.createElement('button', { className: 'btn btn-primary btn-lg', onClick: () => navigate('/register') }, 'Create your free account →')
     ),
 
@@ -315,7 +316,7 @@ function AuthPage({ mode, login, register, navigate }) {
       React.createElement('h1', { className: 'auth-title' }, mode === 'login' ? (needTotp ? '🔐 Two-factor auth' : 'Welcome back') : 'Create free account'),
       React.createElement('p', { className: 'auth-subtitle' },
         needTotp ? 'Enter the 6-digit code from your authenticator app'
-        : mode === 'login' ? 'Sign in to manage your hostnames and tunnels' : 'Free subdomain + CGNAT tunnel, no credit card needed'
+        : mode === 'login' ? 'Sign in to manage your hostnames and tunnels' : 'Free — 2 subdomains + 2 CGNAT tunnels, no credit card needed'
       ),
       error && React.createElement(Alert, null, error),
       React.createElement('form', { onSubmit: submit },
@@ -1131,8 +1132,8 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
 
   const isPaidActive = user.status === 'active';
   const isFree = user.plan === 'free' || user.status === 'free';
-  const canAddHost = hosts.length < (user.maxHosts || 1);
-  const canAddTunnel = tunnels.length < (user.maxTunnels || 1);
+  const canAddHost = hosts.length < (user.maxHosts || 2);
+  const canAddTunnel = tunnels.length < (user.maxTunnels || 2);
 
   return React.createElement('div', { className: 'dashboard' },
     msg && React.createElement(Alert, { type: 'success' }, msg),
@@ -1154,11 +1155,11 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
 
     React.createElement('div', { className: 'stats-grid' },
       React.createElement('div', { className: 'stat-card' },
-        React.createElement('div', { className: 'stat-value' }, `${hosts.length}/${user.maxHosts || 1}`),
+        React.createElement('div', { className: 'stat-value' }, `${hosts.length}/${user.maxHosts >= 999999 ? '∞' : (user.maxHosts || 2)}`),
         React.createElement('div', { className: 'stat-label' }, 'Hostnames used')
       ),
       React.createElement('div', { className: 'stat-card' },
-        React.createElement('div', { className: 'stat-value' }, `${tunnels.length}/${user.maxTunnels || 1}`),
+        React.createElement('div', { className: 'stat-value' }, `${tunnels.length}/${user.maxTunnels >= 999999 ? '∞' : (user.maxTunnels || 2)}`),
         React.createElement('div', { className: 'stat-label' }, 'Tunnels used')
       ),
       React.createElement('div', { className: 'stat-card' },
@@ -1182,7 +1183,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
         canAddHost && React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setShowAddHost(true) }, '+ Add hostname')
       ),
       isFree && React.createElement(Alert, { type: 'info' },
-        '🎁 Free plan: 1 subdomain included. Upgrade for more. ',
+        '🎁 Free plan: 2 subdomains + 2 tunnels included. Upgrade for more. ',
         React.createElement('a', { href: '/tutorials/linux-subdomain', onClick: e => { e.preventDefault(); navigate('/tutorials/linux-subdomain'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🐧 Linux tutorial'),
         ' · ',
         React.createElement('a', { href: '/tutorials/windows-subdomain', onClick: e => { e.preventDefault(); navigate('/tutorials/windows-subdomain'); }, style: { color: 'var(--accent2)', fontWeight: 600 } }, '🪟 Windows tutorial')
@@ -1205,7 +1206,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             ]);
           })(),
       !canAddHost && hosts.length > 0 && React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 24, marginTop: 12 } },
-        React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 12 } }, `Hostname limit reached (${user.maxHosts}). Upgrade for more.`),
+        React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 12 } }, `Hostname limit reached (${user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts}). Upgrade for more.`),
         React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setTab('billing') }, 'Upgrade')
       ),
       hosts.length > 0 && React.createElement(DDNSAutoUpdater, { hosts })
@@ -1241,7 +1242,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             ]);
           })(),
       !canAddTunnel && tunnels.length > 0 && React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 24, marginTop: 12 } },
-        React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 12 } }, `Tunnel limit reached (${user.maxTunnels}). Upgrade for more.`),
+        React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 12 } }, `Tunnel limit reached (${user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels}). Upgrade for more.`),
         React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setTab('billing') }, 'Upgrade')
       )
     ),
@@ -1254,7 +1255,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             React.createElement('div', { className: 'flex-between' },
               React.createElement('div', null,
                 React.createElement('h3', { style: { marginBottom: 4 } }, `${planLabel[user.plan]} plan`),
-                React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, `${user.maxHosts} hostnames · ${user.maxTunnels} tunnels`),
+                React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, `${user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts} hostnames · ${user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels} tunnels`),
                 user.planExpiresAt && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Renews ${new Date(user.planExpiresAt).toLocaleDateString()}`)
               ),
               React.createElement('button', { className: 'btn btn-secondary', onClick: handlePortal, disabled: portalLoading },
@@ -1280,8 +1281,8 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
               React.createElement('div', { className: 'price-amount' }, p.amount.split('/')[0]),
               React.createElement('div', { className: 'price-period' }, '/' + p.amount.split('/')[1]),
               React.createElement('ul', { className: 'price-features' },
-                React.createElement('li', null, `${p.maxHosts} hostnames`),
-                React.createElement('li', null, `${p.maxTunnels} tunnels`),
+                React.createElement('li', null, `${p.maxHosts >= 999999 ? 'Unlimited' : p.maxHosts} hostnames`),
+                React.createElement('li', null, `${p.maxTunnels >= 999999 ? 'Unlimited' : p.maxTunnels} tunnels`),
                 React.createElement('li', null, 'IPv4 + IPv6'),
                 p.key === 'annual' && React.createElement('li', { style: { color: 'var(--accent2)', fontWeight: 600 } }, '🔗 Nested subdomains & tunnels'),
               ),
@@ -1861,7 +1862,7 @@ function ProfileTab({ user, refreshUser }) {
     React.createElement('div', { className: 'card' },
       React.createElement('h3', { style: { marginBottom: 12 } }, 'Account info'),
       React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
-        [['Plan', user.plan], ['Status', user.status], ['Hostnames', user.maxHosts], ['Tunnels', user.maxTunnels], ['Role', user.role]].map(([k, v]) =>
+        [['Plan', user.plan], ['Status', user.status], ['Hostnames', user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts], ['Tunnels', user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels], ['Role', user.role]].map(([k, v]) =>
           React.createElement('div', { key: k, className: 'flex-between', style: { fontSize: 14 } },
             React.createElement('span', { style: { color: 'var(--text2)' } }, k),
             React.createElement('span', { style: { fontWeight: 500 } }, String(v))
@@ -2636,7 +2637,7 @@ function TutorialLinuxTunnel({ navigate }) {
 
     React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
       React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
-        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 1 tunnel — no credit card required.'
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 2 tunnels — no credit card required.'
       ),
       React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
     ),
@@ -2728,7 +2729,7 @@ function TutorialWindowsTunnel({ navigate }) {
 
     React.createElement(TutorialStep, { num: '1', title: 'Create a free account' },
       React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.6 } },
-        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 1 tunnel — no credit card required.'
+        'Go to ', React.createElement('a', { href: 'https://rslvd.net/register', style: { color: 'var(--accent2)' } }, 'rslvd.net/register'), ' and sign up. Free tier includes 2 tunnels — no credit card required.'
       ),
       React.createElement(TutorialScreenshot, { src: '/img/tutorials/register.png', alt: 'Registration page' })
     ),

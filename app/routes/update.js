@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
+  validate: { xForwardedForHeader: false, ip: false, trustProxy: false, default: false },
   keyGenerator: (req) => req.query.key || req.ip,
   message: 'Too many update requests',
 });

@@ -3,10 +3,10 @@ const stripe = require('../lib/stripe');
 const pool = require('../db/pool');
 
 const PLAN_MAP = {
-  [process.env.STRIPE_PRICE_MONTHLY]: { plan: 'monthly', maxHosts: 3, months: 1 },
-  [process.env.STRIPE_PRICE_QUARTERLY]: { plan: 'quarterly', maxHosts: 5, months: 3 },
-  [process.env.STRIPE_PRICE_SEMI_ANNUAL]: { plan: 'semi_annual', maxHosts: 10, months: 6 },
-  [process.env.STRIPE_PRICE_ANNUAL]: { plan: 'annual', maxHosts: 25, months: 12 },
+  [process.env.STRIPE_PRICE_MONTHLY]: { plan: 'monthly', maxHosts: 4, maxTunnels: 4, months: 1 },
+  [process.env.STRIPE_PRICE_QUARTERLY]: { plan: 'quarterly', maxHosts: 12, maxTunnels: 12, months: 3 },
+  [process.env.STRIPE_PRICE_SEMI_ANNUAL]: { plan: 'semi_annual', maxHosts: 24, maxTunnels: 24, months: 6 },
+  [process.env.STRIPE_PRICE_ANNUAL]: { plan: 'annual', maxHosts: 999999, maxTunnels: 999999, months: 12 },
 };
 
 router.post('/', async (req, res) => {
@@ -34,9 +34,9 @@ router.post('/', async (req, res) => {
 
           await pool.query(
             `UPDATE users SET subscription_id = $1, subscription_status = 'active',
-             plan = $2, max_hosts = $3, plan_expires_at = $4, updated_at = NOW()
-             WHERE stripe_customer_id = $5`,
-            [sub.id, planInfo.plan, planInfo.maxHosts, expiresAt, session.customer]
+             plan = $2, max_hosts = $3, max_tunnels = $4, plan_expires_at = $5, updated_at = NOW()
+             WHERE stripe_customer_id = $6`,
+            [sub.id, planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, expiresAt, session.customer]
           );
         }
         break;
@@ -54,9 +54,9 @@ router.post('/', async (req, res) => {
 
           await pool.query(
             `UPDATE users SET subscription_status = 'active', plan = $1,
-             max_hosts = $2, plan_expires_at = $3, updated_at = NOW()
-             WHERE stripe_customer_id = $4`,
-            [planInfo.plan, planInfo.maxHosts, expiresAt, invoice.customer]
+             max_hosts = $2, max_tunnels = $3, plan_expires_at = $4, updated_at = NOW()
+             WHERE stripe_customer_id = $5`,
+            [planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, expiresAt, invoice.customer]
           );
         }
         break;
@@ -76,7 +76,7 @@ router.post('/', async (req, res) => {
         const sub = event.data.object;
         await pool.query(
           `UPDATE users SET subscription_status = 'inactive', plan = 'none',
-           max_hosts = 0, subscription_id = NULL, updated_at = NOW()
+           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, updated_at = NOW()
            WHERE stripe_customer_id = $1`,
           [sub.customer]
         );

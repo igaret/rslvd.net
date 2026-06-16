@@ -24,8 +24,8 @@ if [ ! -d "/etc/letsencrypt/live/${FQDN}" ]; then
   echo "Issuing cert for ${FQDN} via IONOS DNS-01..."
   certbot certonly --non-interactive --agree-tos \
     --manual --preferred-challenges dns-01 \
-    --manual-auth-hook /opt/certbot-hooks/ionos-auth.sh \
-    --manual-cleanup-hook /opt/certbot-hooks/ionos-cleanup.sh \
+    --manual-auth-hook /opt/rslvd/certbot-hooks/ionos-auth.sh \
+    --manual-cleanup-hook /opt/rslvd/certbot-hooks/ionos-cleanup.sh \
     --cert-name "${FQDN}" \
     -d "${FQDN}" \
     --deploy-hook 'systemctl reload nginx'

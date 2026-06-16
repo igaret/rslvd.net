@@ -4,7 +4,7 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
-const ssl = require('../lib/ssl');
+const tunnelCert = require('../lib/tunnel-cert');
 
 const PORT_MIN = 20000;
 const PORT_MAX = 29999;
@@ -108,8 +108,8 @@ router.post('/', async (req, res) => {
         result.rows[0].status = 'active';
       } catch (e) { console.error('DNS for nested tunnel failed:', e.message); }
 
-      // Provision SSL cert for nested subdomain (async, non-blocking)
-      ssl.provisionCert(fqdn).catch(e => console.error('SSL provision failed:', e.message));
+      // Auto-provision SSL cert for nested subdomain
+      tunnelCert.provisionCert(fqdn);
 
       activity.log('tunnel.create', { userId: user.id, detail: fqdn, req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
@@ -201,10 +201,8 @@ router.delete('/:id', async (req, res) => {
       if (t.ionos_record_id) await ionos.removeRecord(t.ionos_record_id);
     } catch (e) { console.error('DNS remove failed:', e.message); }
 
-    // Remove SSL cert config for nested subdomains
-    if (ssl.isNestedSubdomain(t.fqdn)) {
-      ssl.removeCertConfig(t.fqdn);
-    }
+    // Remove SSL cert for nested subdomain
+    tunnelCert.deprovisionCert(t.fqdn);
 
     activity.log('tunnel.delete', { userId: req.user.id, detail: t.fqdn, req });
     await pool.query('DELETE FROM tunnels WHERE id = $1', [req.params.id]);

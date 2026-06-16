@@ -21,8 +21,10 @@ sudo mkdir -p /opt/rslvd/certbot-hooks
 sudo cp /tmp/rslvd-app/../certbot-hooks/* /opt/rslvd/certbot-hooks/
 sudo chmod +x /opt/rslvd/certbot-hooks/*.sh
 
-echo "==> Creating auto-SSL certificate directory"
-sudo mkdir -p /etc/nginx/conf.d/rslvd-certs
+echo "==> Installing per-tunnel cert provisioning scripts"
+sudo mkdir -p /opt/rslvd/scripts
+sudo cp /tmp/rslvd-app/../scripts/*.sh /opt/rslvd/scripts/
+sudo chmod +x /opt/rslvd/scripts/*.sh
 
 echo "==> Installing npm dependencies"
 cd /opt/rslvd
@@ -61,16 +63,17 @@ sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 sudo ln -sf /opt/rslvd/certbot-hooks/renew-deploy.sh /etc/letsencrypt/renewal-hooks/deploy/rslvd-reload-nginx.sh
 
 echo "==> Granting rslvd user cert provisioning permissions"
-# Allow the rslvd service user to run certbot and nginx reload via sudoers
+# tunnel-cert.js runs the provision/deprovision scripts as: sudo /opt/rslvd/scripts/<script>.sh <fqdn>
+# The scripts run as root and handle certbot, nginx -t, and systemctl reload internally,
+# so the service user only needs NOPASSWD for the two scripts themselves.
 SUDOERS_FILE="/etc/sudoers.d/rslvd-ssl"
-if [ ! -f "$SUDOERS_FILE" ]; then
-  cat <<EOF | sudo tee "$SUDOERS_FILE" > /dev/null
-# Allow rslvd service to provision SSL certs and reload nginx
-rslvd ALL=(ALL) NOPASSWD: /usr/bin/certbot certonly --manual --preferred-challenges=dns *
-rslvd ALL=(ALL) NOPASSWD: /usr/sbin/nginx -s reload
+cat <<EOF | sudo tee "$SUDOERS_FILE" > /dev/null
+# Allow rslvd service to provision/deprovision per-tunnel SSL certs
+rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/provision-tunnel-cert.sh *
+rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/deprovision-tunnel-cert.sh *
 EOF
-  sudo chmod 440 "$SUDOERS_FILE"
-fi
+sudo chmod 440 "$SUDOERS_FILE"
+sudo visudo -cf "$SUDOERS_FILE"
 
 echo "==> Checking service status"
 sleep 2

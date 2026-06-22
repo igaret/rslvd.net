@@ -37,6 +37,7 @@ sudo systemctl enable rslvd
 sudo systemctl restart rslvd
 
 echo "==> Configuring nginx"
+sudo mkdir -p /etc/nginx/conf.d/rslvd-http
 sudo cp /tmp/rslvd-app/nginx-http.conf /etc/nginx/sites-available/rslvd.net
 sudo ln -sf /etc/nginx/sites-available/rslvd.net /etc/nginx/sites-enabled/rslvd.net
 sudo rm -f /etc/nginx/sites-enabled/default
@@ -71,6 +72,8 @@ cat <<EOF | sudo tee "$SUDOERS_FILE" > /dev/null
 # Allow rslvd service to provision/deprovision per-tunnel SSL certs
 rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/provision-tunnel-cert.sh *
 rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/deprovision-tunnel-cert.sh *
+rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/enable-http-fallback.sh *
+rslvd ALL=(ALL) NOPASSWD: /opt/rslvd/scripts/disable-http-fallback.sh *
 EOF
 sudo chmod 440 "$SUDOERS_FILE"
 sudo visudo -cf "$SUDOERS_FILE"

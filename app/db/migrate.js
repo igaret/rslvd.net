@@ -83,6 +83,9 @@ ALTER TABLE users ALTER COLUMN plan SET DEFAULT 'free';
 ALTER TABLE users ALTER COLUMN max_hosts SET DEFAULT 1;
 UPDATE users SET plan = 'free', max_hosts = 1, max_tunnels = 1 WHERE plan = 'none' AND subscription_status = 'inactive';
 
+ALTER TABLE hosts ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
+ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
+
 CREATE TABLE IF NOT EXISTS reserved_subdomains (
   id SERIAL PRIMARY KEY,
   subdomain VARCHAR(63) UNIQUE NOT NULL,

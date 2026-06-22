@@ -33,7 +33,7 @@ router.use(requireAuth);
 router.get('/', async (req, res) => {
   const result = await pool.query(
     `SELECT id, name, tunnel_port, target_host, target_port, protocol,
-            status, fqdn, token, active, created_at, parent_tunnel_id
+            status, fqdn, token, active, created_at, parent_tunnel_id, force_https
      FROM tunnels WHERE user_id = $1 ORDER BY parent_tunnel_id NULLS FIRST, created_at DESC`,
     [req.user.id]
   );
@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
 // ── Create tunnel ────────────────────────────────────────────────────────────
 router.post('/', async (req, res) => {
   try {
-    const { name, target_port, target_host = 'localhost', protocol = 'tcp', parent_id } = req.body;
+    const { name, target_port, target_host = 'localhost', protocol = 'tcp', parent_id, force_https = true } = req.body;
     if (!name || !target_port) return res.status(400).json({ error: 'name and target_port required' });
 
     const user = req.user;
@@ -91,13 +91,14 @@ router.post('/', async (req, res) => {
 
       const token = crypto.randomBytes(32).toString('hex');
 
+      const wantHttps = force_https !== false;
       const result = await pool.query(
         `INSERT INTO tunnels (user_id, name, target_host, target_port, protocol,
-                              status, fqdn, token, parent_tunnel_id)
-         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8)
+                              status, fqdn, token, parent_tunnel_id, force_https)
+         VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,$9)
          RETURNING id, name, target_host, target_port, protocol,
-                   status, fqdn, token, active, created_at, parent_tunnel_id`,
-        [user.id, name, target_host, target_port, protocol, fqdn, token, parent_id]
+                   status, fqdn, token, active, created_at, parent_tunnel_id, force_https`,
+        [user.id, name, target_host, target_port, protocol, fqdn, token, parent_id, wantHttps]
       );
 
       try {
@@ -108,8 +109,12 @@ router.post('/', async (req, res) => {
         result.rows[0].status = 'active';
       } catch (e) { console.error('DNS for nested tunnel failed:', e.message); }
 
-      // Auto-provision SSL cert for nested subdomain
-      tunnelCert.provisionCert(fqdn);
+      // Auto-provision SSL cert for nested subdomain (only when HTTPS enabled)
+      if (wantHttps) {
+        tunnelCert.provisionCert(fqdn);
+      } else {
+        tunnelCert.enableHttpFallback(fqdn);
+      }
 
       activity.log('tunnel.create', { userId: user.id, detail: fqdn, req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
@@ -147,13 +152,14 @@ router.post('/', async (req, res) => {
 
     const token = crypto.randomBytes(32).toString('hex');
 
+    const wantHttps = force_https !== false;
     const result = await pool.query(
       `INSERT INTO tunnels (user_id, name, target_host, target_port, protocol,
-                            status, fqdn, token)
-       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)
+                            status, fqdn, token, force_https)
+       VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8)
        RETURNING id, name, target_host, target_port, protocol,
-                 status, fqdn, token, active, created_at, parent_tunnel_id`,
-      [user.id, name, target_host, target_port, protocol, fqdn, token]
+                 status, fqdn, token, active, created_at, parent_tunnel_id, force_https`,
+      [user.id, name, target_host, target_port, protocol, fqdn, token, wantHttps]
     );
 
     try {
@@ -163,6 +169,8 @@ router.post('/', async (req, res) => {
         [r.recordId, 'active', result.rows[0].id]);
       result.rows[0].status = 'active';
     } catch (e) { console.error('DNS for tunnel failed:', e.message); }
+
+    if (!wantHttps) tunnelCert.enableHttpFallback(fqdn);
 
     activity.log('tunnel.create', { userId: user.id, detail: fqdn, req });
     res.status(201).json(result.rows[0]);
@@ -201,14 +209,43 @@ router.delete('/:id', async (req, res) => {
       if (t.ionos_record_id) await ionos.removeRecord(t.ionos_record_id);
     } catch (e) { console.error('DNS remove failed:', e.message); }
 
-    // Remove SSL cert for nested subdomain
+    // Remove SSL cert and HTTP fallback config
     tunnelCert.deprovisionCert(t.fqdn);
+    tunnelCert.disableHttpFallback(t.fqdn);
 
     activity.log('tunnel.delete', { userId: req.user.id, detail: t.fqdn, req });
     await pool.query('DELETE FROM tunnels WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete tunnel' });
+  }
+});
+
+// ── Toggle HTTPS ──────────────────────────────────────────────────────────────
+router.patch('/:id/https', async (req, res) => {
+  try {
+    const { force_https } = req.body;
+    if (typeof force_https !== 'boolean') return res.status(400).json({ error: 'force_https must be a boolean' });
+
+    const result = await pool.query('SELECT * FROM tunnels WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const t = result.rows[0];
+    if (!t) return res.status(404).json({ error: 'Tunnel not found' });
+
+    await pool.query('UPDATE tunnels SET force_https = $1 WHERE id = $2', [force_https, t.id]);
+
+    if (force_https) {
+      if (tunnelCert.isNested(t.fqdn)) tunnelCert.provisionCert(t.fqdn);
+      tunnelCert.disableHttpFallback(t.fqdn);
+    } else {
+      if (tunnelCert.isNested(t.fqdn)) tunnelCert.deprovisionCert(t.fqdn);
+      tunnelCert.enableHttpFallback(t.fqdn);
+    }
+
+    activity.log('tunnel.https_toggle', { userId: req.user.id, detail: `${t.fqdn} \u2192 ${force_https ? 'on' : 'off'}`, req });
+    res.json({ force_https });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to toggle HTTPS' });
   }
 });
 

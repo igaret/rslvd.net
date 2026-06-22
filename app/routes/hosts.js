@@ -21,7 +21,7 @@ router.use(requireAuth);
 // List user's hosts
 router.get('/', async (req, res) => {
   const result = await pool.query(
-    'SELECT id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at, parent_host_id FROM hosts WHERE user_id = $1 ORDER BY parent_host_id NULLS FIRST, created_at DESC',
+    'SELECT id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at, parent_host_id, force_https FROM hosts WHERE user_id = $1 ORDER BY parent_host_id NULLS FIRST, created_at DESC',
     [req.user.id]
   );
   res.json(result.rows);
@@ -33,7 +33,7 @@ const CAN_NEST = (user) => user.plan === 'annual' || user.is_site_owner;
 // Create a host
 router.post('/', async (req, res) => {
   try {
-    const { hostname, parent_id } = req.body;
+    const { hostname, parent_id, force_https = true } = req.body;
     if (!hostname) return res.status(400).json({ error: 'Hostname required' });
 
     const user = req.user;
@@ -81,15 +81,20 @@ router.post('/', async (req, res) => {
       }
 
       const updateKey = crypto.randomBytes(24).toString('hex');
+      const wantHttps = force_https !== false;
       const result = await pool.query(
-        `INSERT INTO hosts (user_id, hostname, fqdn, update_key, parent_host_id)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at, parent_host_id`,
-        [user.id, hostname, fqdn, updateKey, parent_id]
+        `INSERT INTO hosts (user_id, hostname, fqdn, update_key, parent_host_id, force_https)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at, parent_host_id, force_https`,
+        [user.id, hostname, fqdn, updateKey, parent_id, wantHttps]
       );
 
-      // Auto-provision SSL cert for nested subdomain
-      tunnelCert.provisionCert(fqdn);
+      // Auto-provision SSL cert for nested subdomain (only when HTTPS enabled)
+      if (wantHttps) {
+        tunnelCert.provisionCert(fqdn);
+      } else {
+        tunnelCert.enableHttpFallback(fqdn);
+      }
 
       activity.log('host.create', { userId: user.id, detail: fqdn, req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
@@ -126,11 +131,14 @@ router.post('/', async (req, res) => {
 
     const updateKey = crypto.randomBytes(24).toString('hex');
 
+    const wantHttps = force_https !== false;
     const result = await pool.query(
-      `INSERT INTO hosts (user_id, hostname, fqdn, update_key) VALUES ($1, $2, $3, $4)
-       RETURNING id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at`,
-      [user.id, hostname, fqdn, updateKey]
+      `INSERT INTO hosts (user_id, hostname, fqdn, update_key, force_https) VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, hostname, fqdn, ip_address, ipv6_address, last_updated, update_key, active, created_at, force_https`,
+      [user.id, hostname, fqdn, updateKey, wantHttps]
     );
+
+    if (!wantHttps) tunnelCert.enableHttpFallback(fqdn);
 
     activity.log('host.create', { userId: user.id, detail: fqdn, req });
     res.status(201).json(result.rows[0]);
@@ -155,8 +163,9 @@ router.delete('/:id', async (req, res) => {
       console.error('IONOS delete error:', e.message);
     }
 
-    // Remove SSL cert for nested subdomain
+    // Remove SSL cert and HTTP fallback config
     tunnelCert.deprovisionCert(host.fqdn);
+    tunnelCert.disableHttpFallback(host.fqdn);
 
     await pool.query('DELETE FROM hosts WHERE id = $1', [req.params.id]);
     activity.log('host.delete', { userId: req.user.id, detail: host.fqdn, req });
@@ -164,6 +173,36 @@ router.delete('/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete host' });
+  }
+});
+
+// Toggle HTTPS
+router.patch('/:id/https', async (req, res) => {
+  try {
+    const { force_https } = req.body;
+    if (typeof force_https !== 'boolean') return res.status(400).json({ error: 'force_https must be a boolean' });
+
+    const result = await pool.query('SELECT * FROM hosts WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const host = result.rows[0];
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+
+    await pool.query('UPDATE hosts SET force_https = $1 WHERE id = $2', [force_https, host.id]);
+
+    if (force_https) {
+      // Re-enable HTTPS: provision cert for nested, remove HTTP fallback
+      if (tunnelCert.isNested(host.fqdn)) tunnelCert.provisionCert(host.fqdn);
+      tunnelCert.disableHttpFallback(host.fqdn);
+    } else {
+      // Disable HTTPS: deprovision cert for nested, enable HTTP fallback
+      if (tunnelCert.isNested(host.fqdn)) tunnelCert.deprovisionCert(host.fqdn);
+      tunnelCert.enableHttpFallback(host.fqdn);
+    }
+
+    activity.log('host.https_toggle', { userId: req.user.id, detail: `${host.fqdn} \u2192 ${force_https ? 'on' : 'off'}`, req });
+    res.json({ force_https });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to toggle HTTPS' });
   }
 });
 

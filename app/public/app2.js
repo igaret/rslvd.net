@@ -728,10 +728,11 @@ function TunnelModal({ onClose, onCreated, user, existingTunnels }) {
 }
 
 // ── Tunnel Row (1-click UX) ───────────────────────────────────────────────────
-function TunnelRow({ tunnel: t, onDelete, isNested }) {
+function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
   const [tab, setTab] = useState('client');
   const [showConnect, setShowConnect] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const handleDelete = async () => {
     if (!confirm(`Delete tunnel ${t.name}?`)) return;
@@ -740,9 +741,20 @@ function TunnelRow({ tunnel: t, onDelete, isNested }) {
     catch (err) { alert(err.message); setDeleting(false); }
   };
 
+  const handleHttpsToggle = async () => {
+    const next = !useHttps;
+    setToggling(true);
+    try {
+      await API.patch(`/tunnels/${t.id}/https`, { force_https: next });
+      if (onHttpsToggle) onHttpsToggle(t.id, next);
+    } catch (err) { alert(err.message); }
+    finally { setToggling(false); }
+  };
+
   const fqdn = t.fqdn || `${t.name}.rslvd.net`;
   const protocol = t.protocol || 'tcp';
-  const publicUrl = `https://${fqdn}`;
+  const useHttps = t.force_https !== false;
+  const publicUrl = `${useHttps ? 'https' : 'http'}://${fqdn}`;
   const localHost = t.target_host || 'localhost';
   
   // Protocol-specific connection commands
@@ -767,6 +779,12 @@ function TunnelRow({ tunnel: t, onDelete, isNested }) {
       ),
       React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
         React.createElement('span', { className: 'badge badge-purple', style: { fontSize: 10, textTransform: 'uppercase' } }, protocol),
+        React.createElement('button', {
+          className: `btn btn-sm ${useHttps ? 'btn-secondary' : 'btn-secondary'}`,
+          onClick: handleHttpsToggle, disabled: toggling,
+          title: useHttps ? 'HTTPS enabled (click to switch to HTTP)' : 'HTTP only (click to enable HTTPS)',
+          style: { fontSize: 11, padding: '2px 8px', minWidth: 60, opacity: toggling ? 0.6 : 1 }
+        }, toggling ? '...' : (useHttps ? '🔒 HTTPS' : '🔓 HTTP')),
         React.createElement('span', { className: `badge badge-${t.status === 'active' ? 'green' : 'yellow'}` }, t.status),
         React.createElement('button', {
           className: `btn btn-primary btn-sm`,
@@ -980,16 +998,28 @@ function AddHostModal({ onClose, onCreated, user, existingHosts }) {
 }
 
 // ── Host Card ────────────────────────────────────────────────────────────────
-function HostCard({ host: h, onDelete, onRegenKey, isNested }) {
+function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, isNested }) {
   const [showKey, setShowKey] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [detectedIp, setDetectedIp] = useState(null);
   const [detecting, setDetecting] = useState(false);
   const [manualIp, setManualIp] = useState(['', '', '', '']);
   const [showManualIp, setShowManualIp] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
+  const useHttps = h.force_https !== false;
   const manualIpString = manualIp.every(o => o && o >= 0 && o <= 255) ? manualIp.join('.') : null;
   const updateUrl = `https://rslvd.net/api/update?key=${h.update_key}&ip=${manualIpString || detectedIp || h.ip_address || 'auto'}`;
+
+  const handleHttpsToggle = async () => {
+    const next = !useHttps;
+    setToggling(true);
+    try {
+      await API.patch(`/hosts/${h.id}/https`, { force_https: next });
+      if (onHttpsToggle) onHttpsToggle(h.id, next);
+    } catch (err) { alert(err.message); }
+    finally { setToggling(false); }
+  };
 
   const handleDelete = async () => {
     if (!confirm(`Delete ${h.fqdn}?`)) return;
@@ -1047,8 +1077,16 @@ function HostCard({ host: h, onDelete, onRegenKey, isNested }) {
           h.last_updated ? `Last update: ${new Date(h.last_updated).toLocaleString()}` : 'Never updated'
         )
       ),
-      React.createElement('button', { className: 'btn btn-danger btn-sm', onClick: handleDelete, disabled: deleting },
-        deleting ? React.createElement(Spinner) : 'Delete'
+      React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        React.createElement('button', {
+          className: 'btn btn-sm btn-secondary',
+          onClick: handleHttpsToggle, disabled: toggling,
+          title: useHttps ? 'HTTPS enabled (click to switch to HTTP)' : 'HTTP only (click to enable HTTPS)',
+          style: { fontSize: 11, padding: '2px 8px', minWidth: 60, opacity: toggling ? 0.6 : 1 }
+        }, toggling ? '...' : (useHttps ? '\ud83d\udd12 HTTPS' : '\ud83d\udd13 HTTP')),
+        React.createElement('button', { className: 'btn btn-danger btn-sm', onClick: handleDelete, disabled: deleting },
+          deleting ? React.createElement(Spinner) : 'Delete'
+        )
       )
     ),
     React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
@@ -1111,8 +1149,10 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const onHostCreated = h => { setHosts(x => [h, ...x]); setShowAddHost(false); };
   const onHostDeleted = id => setHosts(x => x.filter(h => h.id !== id));
   const onRegenKey = (id, key) => setHosts(x => x.map(h => h.id === id ? { ...h, update_key: key } : h));
+  const onHostHttpsToggle = (id, val) => setHosts(x => x.map(h => h.id === id ? { ...h, force_https: val } : h));
   const onTunnelCreated = t => { setTunnels(x => [t, ...x]); setShowAddTunnel(false); };
   const onTunnelDeleted = id => setTunnels(x => x.filter(t => t.id !== id));
+  const onTunnelHttpsToggle = (id, val) => setTunnels(x => x.map(t => t.id === id ? { ...t, force_https: val } : t));
 
   const handleCheckout = async (planKey) => {
     setCheckoutLoading(planKey);
@@ -1199,9 +1239,9 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             const topLevel = hosts.filter(h => !h.parent_host_id);
             const children = hosts.filter(h => !!h.parent_host_id);
             return topLevel.flatMap(h => [
-              React.createElement(HostCard, { key: h.id, host: h, onDelete: onHostDeleted, onRegenKey, isNested: false }),
+              React.createElement(HostCard, { key: h.id, host: h, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, isNested: false }),
               ...children.filter(c => c.parent_host_id === h.id).map(c =>
-                React.createElement(HostCard, { key: c.id, host: c, onDelete: onHostDeleted, onRegenKey, isNested: true })
+                React.createElement(HostCard, { key: c.id, host: c, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, isNested: true })
               )
             ]);
           })(),
@@ -1235,9 +1275,9 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             const topLevel = tunnels.filter(t => !t.parent_tunnel_id);
             const children = tunnels.filter(t => !!t.parent_tunnel_id);
             return topLevel.flatMap(t => [
-              React.createElement(TunnelRow, { key: t.id, tunnel: t, onDelete: onTunnelDeleted, isNested: false }),
+              React.createElement(TunnelRow, { key: t.id, tunnel: t, onDelete: onTunnelDeleted, onHttpsToggle: onTunnelHttpsToggle, isNested: false }),
               ...children.filter(c => c.parent_tunnel_id === t.id).map(c =>
-                React.createElement(TunnelRow, { key: c.id, tunnel: c, onDelete: onTunnelDeleted, isNested: true })
+                React.createElement(TunnelRow, { key: c.id, tunnel: c, onDelete: onTunnelDeleted, onHttpsToggle: onTunnelHttpsToggle, isNested: true })
               )
             ]);
           })(),

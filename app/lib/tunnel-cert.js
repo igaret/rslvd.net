@@ -2,6 +2,8 @@ const { spawn } = require('child_process');
 
 const PROVISION_SCRIPT = '/opt/rslvd/scripts/provision-tunnel-cert.sh';
 const DEPROVISION_SCRIPT = '/opt/rslvd/scripts/deprovision-tunnel-cert.sh';
+const ENABLE_HTTP_SCRIPT = '/opt/rslvd/scripts/enable-http-fallback.sh';
+const DISABLE_HTTP_SCRIPT = '/opt/rslvd/scripts/disable-http-fallback.sh';
 
 // A nested tunnel FQDN has more labels than "<single-level>.<base>".
 // e.g. base = rslvd.net (2 labels). Single-level = name.rslvd.net (3 labels,
@@ -45,4 +47,32 @@ function deprovisionCert(fqdn) {
   }
 }
 
-module.exports = { provisionCert, deprovisionCert, isNested };
+function enableHttpFallback(fqdn) {
+  try {
+    const child = spawn('sudo', [ENABLE_HTTP_SCRIPT, fqdn], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', (e) => console.error(`[http-fallback] enable spawn failed for ${fqdn}:`, e.message));
+    child.unref();
+    console.log(`[http-fallback] enabling HTTP for ${fqdn}`);
+  } catch (e) {
+    console.error(`[http-fallback] enable error for ${fqdn}:`, e.message);
+  }
+}
+
+function disableHttpFallback(fqdn) {
+  try {
+    const child = spawn('sudo', [DISABLE_HTTP_SCRIPT, fqdn], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', (e) => console.error(`[http-fallback] disable spawn failed for ${fqdn}:`, e.message));
+    child.unref();
+    console.log(`[http-fallback] disabling HTTP fallback for ${fqdn}`);
+  } catch (e) {
+    console.error(`[http-fallback] disable error for ${fqdn}:`, e.message);
+  }
+}
+
+module.exports = { provisionCert, deprovisionCert, isNested, enableHttpFallback, disableHttpFallback };

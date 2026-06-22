@@ -742,7 +742,7 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
   };
 
   const handleHttpsToggle = async () => {
-    const next = !t.force_https;
+    const next = !useHttps;
     setToggling(true);
     try {
       await API.patch(`/tunnels/${t.id}/https`, { force_https: next });
@@ -1012,7 +1012,7 @@ function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, isNested }) {
   const updateUrl = `https://rslvd.net/api/update?key=${h.update_key}&ip=${manualIpString || detectedIp || h.ip_address || 'auto'}`;
 
   const handleHttpsToggle = async () => {
-    const next = !h.force_https;
+    const next = !useHttps;
     setToggling(true);
     try {
       await API.patch(`/hosts/${h.id}/https`, { force_https: next });

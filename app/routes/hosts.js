@@ -90,7 +90,11 @@ router.post('/', async (req, res) => {
       );
 
       // Auto-provision SSL cert for nested subdomain (only when HTTPS enabled)
-      if (wantHttps) tunnelCert.provisionCert(fqdn);
+      if (wantHttps) {
+        tunnelCert.provisionCert(fqdn);
+      } else {
+        tunnelCert.enableHttpFallback(fqdn);
+      }
 
       activity.log('host.create', { userId: user.id, detail: fqdn, req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
@@ -134,6 +138,8 @@ router.post('/', async (req, res) => {
       [user.id, hostname, fqdn, updateKey, wantHttps]
     );
 
+    if (!wantHttps) tunnelCert.enableHttpFallback(fqdn);
+
     activity.log('host.create', { userId: user.id, detail: fqdn, req });
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -157,8 +163,9 @@ router.delete('/:id', async (req, res) => {
       console.error('IONOS delete error:', e.message);
     }
 
-    // Remove SSL cert for nested subdomain
+    // Remove SSL cert and HTTP fallback config
     tunnelCert.deprovisionCert(host.fqdn);
+    tunnelCert.disableHttpFallback(host.fqdn);
 
     await pool.query('DELETE FROM hosts WHERE id = $1', [req.params.id]);
     activity.log('host.delete', { userId: req.user.id, detail: host.fqdn, req });
@@ -181,16 +188,17 @@ router.patch('/:id/https', async (req, res) => {
 
     await pool.query('UPDATE hosts SET force_https = $1 WHERE id = $2', [force_https, host.id]);
 
-    // For nested subdomains, provision or deprovision the cert
-    if (tunnelCert.isNested(host.fqdn)) {
-      if (force_https) {
-        tunnelCert.provisionCert(host.fqdn);
-      } else {
-        tunnelCert.deprovisionCert(host.fqdn);
-      }
+    if (force_https) {
+      // Re-enable HTTPS: provision cert for nested, remove HTTP fallback
+      if (tunnelCert.isNested(host.fqdn)) tunnelCert.provisionCert(host.fqdn);
+      tunnelCert.disableHttpFallback(host.fqdn);
+    } else {
+      // Disable HTTPS: deprovision cert for nested, enable HTTP fallback
+      if (tunnelCert.isNested(host.fqdn)) tunnelCert.deprovisionCert(host.fqdn);
+      tunnelCert.enableHttpFallback(host.fqdn);
     }
 
-    activity.log('host.https_toggle', { userId: req.user.id, detail: `${host.fqdn} → ${force_https ? 'on' : 'off'}`, req });
+    activity.log('host.https_toggle', { userId: req.user.id, detail: `${host.fqdn} \u2192 ${force_https ? 'on' : 'off'}`, req });
     res.json({ force_https });
   } catch (err) {
     console.error(err);

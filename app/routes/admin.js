@@ -278,44 +278,47 @@ router.post('/restore', requireSiteOwner, async (req, res) => {
 
     // Restore hosts
     for (const h of data.hosts) {
-      await client.query(
+      const hRes = await client.query(
         `INSERT INTO hosts (id, user_id, hostname, parent_host_id, fqdn, ip_address, ipv6_address,
                             ionos_record_id_v4, ionos_record_id_v6, last_updated, update_key, active,
                             force_https, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO NOTHING RETURNING id`,
         [h.id, h.user_id, h.hostname, h.parent_host_id, h.fqdn, h.ip_address, h.ipv6_address,
          h.ionos_record_id_v4, h.ionos_record_id_v6, h.last_updated, h.update_key, h.active,
          h.force_https !== false, h.created_at]
       );
-      results.hosts++;
+      if (hRes.rows.length > 0) results.hosts++;
+      else results.skipped++;
     }
 
     // Restore tunnels
     for (const t of data.tunnels) {
-      await client.query(
+      const tRes = await client.query(
         `INSERT INTO tunnels (id, user_id, name, tunnel_port, target_host, target_port, protocol,
                               wg_public_key, wg_preshared_key, wg_client_ip, wg_server_port, status,
                               fqdn, ionos_record_id, token, active, force_https, parent_tunnel_id, created_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-         ON CONFLICT (id) DO NOTHING`,
+         ON CONFLICT (id) DO NOTHING RETURNING id`,
         [t.id, t.user_id, t.name, t.tunnel_port, t.target_host, t.target_port, t.protocol,
          t.wg_public_key, t.wg_preshared_key, t.wg_client_ip, t.wg_server_port, t.status,
          t.fqdn, t.ionos_record_id, t.token, t.active, t.force_https !== false,
          t.parent_tunnel_id, t.created_at]
       );
-      results.tunnels++;
+      if (tRes.rows.length > 0) results.tunnels++;
+      else results.skipped++;
     }
 
     // Restore reserved subdomains
     if (data.reserved_subdomains) {
       for (const r of data.reserved_subdomains) {
-        await client.query(
+        const rRes = await client.query(
           `INSERT INTO reserved_subdomains (subdomain, reason, created_by, created_at)
-           VALUES ($1, $2, $3, $4) ON CONFLICT (subdomain) DO NOTHING`,
+           VALUES ($1, $2, $3, $4) ON CONFLICT (subdomain) DO NOTHING RETURNING subdomain`,
           [r.subdomain, r.reason, r.created_by, r.created_at]
         );
-        results.reserved++;
+        if (rRes.rows.length > 0) results.reserved++;
+        else results.skipped++;
       }
     }
 

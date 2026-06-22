@@ -64,10 +64,10 @@ public class DdnsUpdateWorker extends Worker {
                         response.append(line);
                     }
                     reader.close();
-                    Log.d(TAG, "Updated host (key=" + key.substring(0, 8) + "...): " + response);
+                    Log.d(TAG, "Updated host (key=" + key.substring(0, Math.min(key.length(), 8)) + "...): " + response);
                     successCount++;
                 } else {
-                    Log.w(TAG, "Update failed for key " + key.substring(0, 8) + "... HTTP " + code);
+                    Log.w(TAG, "Update failed for key " + key.substring(0, Math.min(key.length(), 8)) + "... HTTP " + code);
                 }
                 conn.disconnect();
             } catch (Exception e) {

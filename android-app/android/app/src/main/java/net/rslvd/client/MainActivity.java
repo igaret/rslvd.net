@@ -1,5 +1,7 @@
 package net.rslvd.client;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 
 import androidx.work.Constraints;
@@ -18,10 +20,14 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DdnsPlugin.class);
         super.onCreate(savedInstanceState);
-        scheduleDdnsUpdates();
+        scheduleDdnsUpdatesIfConfigured();
     }
 
-    private void scheduleDdnsUpdates() {
+    private void scheduleDdnsUpdatesIfConfigured() {
+        SharedPreferences prefs = getSharedPreferences("rslvd_ddns", Context.MODE_PRIVATE);
+        String hosts = prefs.getString("ddns_hosts", "");
+        if (hosts.isEmpty()) return;
+
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build();
@@ -33,7 +39,7 @@ public class MainActivity extends BridgeActivity {
 
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "rslvd_ddns_update",
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.REPLACE,
                 ddnsWork
         );
     }

@@ -1426,13 +1426,13 @@ function AdminDashboard({ user, navigate }) {
     // Tabs
     React.createElement('div', { style: { display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' } },
       (isSiteOwner
-        ? ['overview', 'users', 'hosts', 'tunnels', 'activity', 'reserved']
+        ? ['overview', 'users', 'hosts', 'tunnels', 'activity', 'reserved', 'backup']
         : ['overview', 'users', 'hosts', 'tunnels', 'activity']
       ).map(t =>
         React.createElement('button', {
           key: t, onClick: () => setTab(t),
           style: { padding: '10px 18px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: tab === t ? 'var(--text)' : 'var(--text2)', borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent', marginBottom: -1 }
-        }, t === 'reserved' ? '🔒 Reserved' : t === 'activity' ? '📋 Activity' : t.charAt(0).toUpperCase() + t.slice(1))
+        }, t === 'reserved' ? '🔒 Reserved' : t === 'activity' ? '📋 Activity' : t === 'backup' ? '💾 Backup' : t.charAt(0).toUpperCase() + t.slice(1))
       )
     ),
 
@@ -1563,6 +1563,9 @@ function AdminDashboard({ user, navigate }) {
 
     // Reserved subdomains tab
     tab === 'reserved' && isSiteOwner && React.createElement(ReservedPanel, { key: reservedKey }),
+
+    // Backup tab
+    tab === 'backup' && isSiteOwner && React.createElement(BackupPanel),
 
     // Edit user modal
     editUser && React.createElement(EditUserModal, {
@@ -1773,6 +1776,80 @@ function ReservedPanel() {
             )
           ))
         )
+      )
+    )
+  );
+}
+
+// ── Backup Panel ──────────────────────────────────────────────────────────────
+function BackupPanel() {
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  const handleExport = async () => {
+    setExporting(true); setError('');
+    try {
+      const res = await fetch('/api/admin/backup', { headers: API.headers() });
+      if (!res.ok) throw new Error('Backup failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rslvd-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setResult({ type: 'export', message: 'Backup downloaded successfully' });
+    } catch (e) { setError(e.message); }
+    finally { setExporting(false); }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('This will import data from the backup file. Existing records with the same ID will be skipped. Continue?')) {
+      e.target.value = ''; return;
+    }
+    setImporting(true); setError(''); setResult(null);
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      if (!backup.data) throw new Error('Invalid backup file format');
+      const res = await API.post('/admin/restore', backup);
+      setResult({ type: 'import', message: `Restored: ${res.results.users} users, ${res.results.hosts} hosts, ${res.results.tunnels} tunnels, ${res.results.reserved} reserved. Skipped ${res.results.skipped} existing.` });
+    } catch (e) { setError(e.message); }
+    finally { setImporting(false); e.target.value = ''; }
+  };
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'card mb-4' },
+      React.createElement('h3', { style: { marginBottom: 8 } }, 'Database Backup'),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 13, marginBottom: 20 } },
+        'Export all users, hosts, tunnels, reserved subdomains, and activity logs as a JSON file. Use this to create periodic backups or migrate data.'
+      ),
+      error && React.createElement(Alert, null, error),
+      result && React.createElement(Alert, { type: 'success' }, result.message),
+      React.createElement('div', { style: { display: 'flex', gap: 16, flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: handleExport, disabled: exporting },
+          exporting ? React.createElement(Spinner) : '⬇ Export Backup'
+        ),
+        React.createElement('div', null,
+          React.createElement('input', { type: 'file', accept: '.json', ref: fileRef, onChange: handleImport, style: { display: 'none' } }),
+          React.createElement('button', { className: 'btn btn-secondary', onClick: () => fileRef.current.click(), disabled: importing },
+            importing ? React.createElement(Spinner) : '⬆ Import Backup'
+          )
+        )
+      )
+    ),
+    React.createElement('div', { className: 'card' },
+      React.createElement('h3', { style: { marginBottom: 12 } }, 'How it works'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', lineHeight: 1.8 } },
+        React.createElement('p', null, '• Export downloads a full JSON snapshot of the database (users, hosts, tunnels, reserved subdomains, activity logs).'),
+        React.createElement('p', null, '• Import inserts records that don\'t already exist (matched by ID or email). It will NOT overwrite existing data.'),
+        React.createElement('p', null, '• Passwords are stored hashed — restoring a backup preserves the original password hashes.'),
+        React.createElement('p', null, '• Activity logs are capped at the most recent 10,000 entries in exports.')
       )
     )
   );

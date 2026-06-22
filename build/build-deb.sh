@@ -38,7 +38,8 @@ Description: Dynamic DNS + CGNAT tunnel client for rslvd.net
  modes. Works behind carrier-grade NAT (CGNAT) without port forwarding.
 EOF
 
-  # Systemd service template
+  # Systemd service template (uses EnvironmentFile for token + port)
+  mkdir -p "$PKG_DIR/etc/rslvd-tunnel"
   cat > "$PKG_DIR/etc/systemd/system/rslvd-tunnel@.service" << EOF
 [Unit]
 Description=rslvd.net Tunnel (%i)
@@ -47,7 +48,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/rslvd-tunnel -token %i
+EnvironmentFile=/etc/rslvd-tunnel/%i.conf
+ExecStart=/usr/bin/rslvd-tunnel \$TOKEN \$LOCAL_PORT
 Restart=always
 RestartSec=5
 
@@ -63,10 +65,13 @@ echo ""
 echo "  rslvd-tunnel installed successfully!"
 echo ""
 echo "  Usage:"
-echo "    rslvd-tunnel -token YOUR_TOKEN -local localhost:8080"
+echo "    rslvd-tunnel YOUR_TOKEN 8080"
 echo ""
-echo "  Systemd service (per-tunnel):"
-echo "    sudo systemctl enable --now rslvd-tunnel@YOUR_TOKEN"
+echo "  As a systemd service:"
+echo "    1. Create /etc/rslvd-tunnel/myapp.conf with:"
+echo "       TOKEN=your_tunnel_token"
+echo "       LOCAL_PORT=8080"
+echo "    2. sudo systemctl enable --now rslvd-tunnel@myapp"
 echo ""
 EOF
   chmod 755 "$PKG_DIR/DEBIAN/postinst"

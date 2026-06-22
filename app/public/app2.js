@@ -3003,7 +3003,7 @@ function DownloadsPage({ navigate }) {
       React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', lineHeight: 1.8 } },
         React.createElement('p', null, '1. ', React.createElement('a', { href: '/register', onClick: e => { e.preventDefault(); navigate('/register'); }, style: { color: 'var(--accent2)' } }, 'Create a free account'), ' if you haven\'t already.'),
         React.createElement('p', null, '2. Create a tunnel from your ', React.createElement('a', { href: '/dashboard', onClick: e => { e.preventDefault(); navigate('/dashboard'); }, style: { color: 'var(--accent2)' } }, 'Dashboard'), '.'),
-        React.createElement('p', null, '3. Run: ', React.createElement('code', { style: { background: 'var(--bg2)', padding: '2px 6px', borderRadius: 3 } }, 'rslvd-tunnel -token YOUR_TOKEN -local localhost:8080')),
+        React.createElement('p', null, '3. Run: ', React.createElement('code', { style: { background: 'var(--bg2)', padding: '2px 6px', borderRadius: 3 } }, 'rslvd-tunnel YOUR_TOKEN 8080')),
         React.createElement('p', null, '4. Your service is now live at ', React.createElement('code', { style: { background: 'var(--bg2)', padding: '2px 6px', borderRadius: 3 } }, 'yourname.rslvd.net'), '!')
       )
     ),

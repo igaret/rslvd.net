@@ -201,7 +201,7 @@ router.post('/accounts/:id/test', async (req, res) => {
       try {
         const transport = nodemailer.createTransport({
           host: acct.smtp_host, port: acct.smtp_port,
-          secure: acct.smtp_port === 465,
+          secure: acct.smtp_tls,
           auth: { user: acct.username, pass: password },
           tls: { rejectUnauthorized: false }
         });
@@ -271,37 +271,40 @@ router.get('/accounts/:id/messages', async (req, res) => {
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      const status = client.mailbox;
-      const total = status.exists || 0;
-      const start = Math.max(1, total - (page * limit) + 1);
-      const end = Math.max(1, total - ((page - 1) * limit));
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        const status = client.mailbox;
+        const total = status.exists || 0;
+        const start = Math.max(1, total - (page * limit) + 1);
+        const end = Math.max(1, total - ((page - 1) * limit));
 
-      if (total === 0) {
-        res.json({ messages: [], total, page, pages: 0 });
-        return;
+        if (total === 0) {
+          res.json({ messages: [], total, page, pages: 0 });
+          return;
+        }
+
+        const messages = [];
+        const range = `${start}:${end}`;
+        for await (const msg of client.fetch(range, { envelope: true, flags: true, uid: true, size: true })) {
+          messages.push({
+            uid: msg.uid, seq: msg.seq,
+            subject: msg.envelope.subject || '(no subject)',
+            from: msg.envelope.from || [],
+            to: msg.envelope.to || [],
+            date: msg.envelope.date,
+            flags: msg.flags ? [...msg.flags] : [],
+            size: msg.size || 0
+          });
+        }
+
+        messages.sort((a, b) => new Date(b.date) - new Date(a.date));
+        res.json({ messages, total, page, pages: Math.ceil(total / limit) });
+      } finally {
+        lock.release();
       }
-
-      const messages = [];
-      const range = `${start}:${end}`;
-      for await (const msg of client.fetch(range, { envelope: true, flags: true, uid: true, size: true })) {
-        messages.push({
-          uid: msg.uid, seq: msg.seq,
-          subject: msg.envelope.subject || '(no subject)',
-          from: msg.envelope.from || [],
-          to: msg.envelope.to || [],
-          date: msg.envelope.date,
-          flags: msg.flags ? [...msg.flags] : [],
-          size: msg.size || 0
-        });
-      }
-
-      messages.sort((a, b) => new Date(b.date) - new Date(a.date));
-      res.json({ messages, total, page, pages: Math.ceil(total / limit) });
     } finally {
-      lock.release();
       await client.logout();
     }
   } catch (err) {
@@ -328,36 +331,39 @@ router.get('/accounts/:id/messages/:uid', async (req, res) => {
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      const raw = await client.download(uid.toString(), undefined, { uid: true });
-      if (!raw || !raw.content) {
-        return res.status(404).json({ error: 'Message not found' });
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        const raw = await client.download(uid.toString(), undefined, { uid: true });
+        if (!raw || !raw.content) {
+          return res.status(404).json({ error: 'Message not found' });
+        }
+        const chunks = [];
+        for await (const chunk of raw.content) chunks.push(chunk);
+        const buf = Buffer.concat(chunks);
+        const parsed = await simpleParser(buf);
+
+        await client.messageFlagsAdd(uid.toString(), ['\\Seen'], { uid: true });
+
+        res.json({
+          uid,
+          subject: parsed.subject || '(no subject)',
+          from: parsed.from ? parsed.from.value : [],
+          to: parsed.to ? parsed.to.value : [],
+          cc: parsed.cc ? parsed.cc.value : [],
+          date: parsed.date,
+          html: parsed.html || null,
+          text: parsed.text || null,
+          attachments: (parsed.attachments || []).map(a => ({
+            filename: a.filename, contentType: a.contentType, size: a.size,
+            contentId: a.contentId || null
+          }))
+        });
+      } finally {
+        lock.release();
       }
-      const chunks = [];
-      for await (const chunk of raw.content) chunks.push(chunk);
-      const buf = Buffer.concat(chunks);
-      const parsed = await simpleParser(buf);
-
-      await client.messageFlagsAdd(uid.toString(), ['\\Seen'], { uid: true });
-
-      res.json({
-        uid,
-        subject: parsed.subject || '(no subject)',
-        from: parsed.from ? parsed.from.value : [],
-        to: parsed.to ? parsed.to.value : [],
-        cc: parsed.cc ? parsed.cc.value : [],
-        date: parsed.date,
-        html: parsed.html || null,
-        text: parsed.text || null,
-        attachments: (parsed.attachments || []).map(a => ({
-          filename: a.filename, contentType: a.contentType, size: a.size,
-          contentId: a.contentId || null
-        }))
-      });
     } finally {
-      lock.release();
       await client.logout();
     }
   } catch (err) {
@@ -378,7 +384,7 @@ router.post('/accounts/:id/send', async (req, res) => {
 
     const transport = nodemailer.createTransport({
       host: acct.smtp_host, port: acct.smtp_port,
-      secure: acct.smtp_port === 465,
+      secure: acct.smtp_tls,
       auth: { user: acct.username, pass: password },
       tls: { rejectUnauthorized: false }
     });
@@ -407,9 +413,7 @@ router.post('/accounts/:id/send', async (req, res) => {
         const boxes = await client.list();
         const sentBox = boxes.find(b => b.specialUse === '\\Sent') || boxes.find(b => /sent/i.test(b.name));
         if (sentBox) {
-          const raw = await transport.sendMail({ ...mailOpts, envelope: false });
-          // Build raw message for appending
-          const rawMsg = `From: ${acct.email_address}\r\nTo: ${to}\r\nSubject: ${subject || ''}\r\nDate: ${new Date().toUTCString()}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${text || ''}`;
+          const rawMsg = `From: ${acct.email_address}\r\nTo: ${to}\r\nSubject: ${subject || ''}\r\nDate: ${new Date().toUTCString()}\r\nMessage-ID: ${info.messageId}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${text || ''}`;
           await client.append(sentBox.path, rawMsg, ['\\Seen']);
         }
         await client.logout();
@@ -437,12 +441,15 @@ router.delete('/accounts/:id/messages/:uid', async (req, res) => {
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      await client.messageDelete(uid.toString(), { uid: true });
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        await client.messageDelete(uid.toString(), { uid: true });
+      } finally {
+        lock.release();
+      }
     } finally {
-      lock.release();
       await client.logout();
     }
     res.json({ ok: true });
@@ -468,12 +475,15 @@ router.post('/accounts/:id/messages/:uid/move', async (req, res) => {
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      await client.messageMove(uid.toString(), destination, { uid: true });
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        await client.messageMove(uid.toString(), destination, { uid: true });
+      } finally {
+        lock.release();
+      }
     } finally {
-      lock.release();
       await client.logout();
     }
     res.json({ ok: true });
@@ -498,16 +508,19 @@ router.post('/accounts/:id/messages/:uid/flag', async (req, res) => {
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      if (add) {
-        await client.messageFlagsAdd(uid.toString(), [flag], { uid: true });
-      } else {
-        await client.messageFlagsRemove(uid.toString(), [flag], { uid: true });
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        if (add) {
+          await client.messageFlagsAdd(uid.toString(), [flag], { uid: true });
+        } else {
+          await client.messageFlagsRemove(uid.toString(), [flag], { uid: true });
+        }
+      } finally {
+        lock.release();
       }
     } finally {
-      lock.release();
       await client.logout();
     }
     res.json({ ok: true });
@@ -532,20 +545,23 @@ router.get('/accounts/:id/messages/:uid/attachment/:index', async (req, res) => 
       secure: acct.imap_tls, auth: { user: acct.username, pass: password },
       logger: false
     });
-    await client.connect();
-    const lock = await client.getMailboxLock(folder);
     try {
-      const raw = await client.download(uid.toString(), undefined, { uid: true });
-      const chunks = [];
-      for await (const chunk of raw.content) chunks.push(chunk);
-      const parsed = await simpleParser(Buffer.concat(chunks));
-      const att = (parsed.attachments || [])[attachIndex];
-      if (!att) return res.status(404).json({ error: 'Attachment not found' });
-      res.setHeader('Content-Type', att.contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="${att.filename || 'attachment'}"`);
-      res.send(att.content);
+      await client.connect();
+      const lock = await client.getMailboxLock(folder);
+      try {
+        const raw = await client.download(uid.toString(), undefined, { uid: true });
+        const chunks = [];
+        for await (const chunk of raw.content) chunks.push(chunk);
+        const parsed = await simpleParser(Buffer.concat(chunks));
+        const att = (parsed.attachments || [])[attachIndex];
+        if (!att) return res.status(404).json({ error: 'Attachment not found' });
+        res.setHeader('Content-Type', att.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename="${att.filename || 'attachment'}"`);
+        res.send(att.content);
+      } finally {
+        lock.release();
+      }
     } finally {
-      lock.release();
       await client.logout();
     }
   } catch (err) {
@@ -555,12 +571,17 @@ router.get('/accounts/:id/messages/:uid/attachment/:index', async (req, res) => 
 
 // ── POP3 helpers ─────────────────────────────────────────────────────────────
 
-function pop3Command(socket, cmd) {
+function pop3Command(socket, cmd, timeout = 30000) {
   return new Promise((resolve, reject) => {
     let data = '';
+    const timer = setTimeout(() => {
+      socket.removeListener('data', onData);
+      reject(new Error('POP3 command timeout'));
+    }, timeout);
     const onData = chunk => {
       data += chunk.toString();
       if (data.includes('\r\n')) {
+        clearTimeout(timer);
         socket.removeListener('data', onData);
         if (data.startsWith('+OK')) resolve(data.trim());
         else reject(new Error(data.trim()));
@@ -571,12 +592,17 @@ function pop3Command(socket, cmd) {
   });
 }
 
-function pop3MultiLine(socket, cmd) {
+function pop3MultiLine(socket, cmd, timeout = 30000) {
   return new Promise((resolve, reject) => {
     let data = '';
+    const timer = setTimeout(() => {
+      socket.removeListener('data', onData);
+      reject(new Error('POP3 command timeout'));
+    }, timeout);
     const onData = chunk => {
       data += chunk.toString();
       if (data.includes('\r\n.\r\n')) {
+        clearTimeout(timer);
         socket.removeListener('data', onData);
         if (data.startsWith('+OK')) resolve(data);
         else reject(new Error(data.trim()));

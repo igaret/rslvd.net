@@ -273,7 +273,7 @@ function Landing({ navigate }) {
         React.createElement('a', { href: '/login', onClick: e => { e.preventDefault(); navigate('/login'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Login'),
         React.createElement('a', { href: '/register', onClick: e => { e.preventDefault(); navigate('/register'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Register'),
         React.createElement('a', { href: '/tutorials', onClick: e => { e.preventDefault(); navigate('/tutorials'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Tutorials'),
-        React.createElement('a', { href: 'https://rslvd.net/dl/rslvd-tunnel-linux-amd64', style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Downloads'),
+        React.createElement('a', { href: '/downloads', onClick: e => { e.preventDefault(); navigate('/downloads'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Downloads'),
         React.createElement('a', { href: '/terms', onClick: e => { e.preventDefault(); navigate('/terms'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Terms'),
         React.createElement('a', { href: '/privacy', onClick: e => { e.preventDefault(); navigate('/privacy'); }, style: { color: 'var(--text3)', textDecoration: 'none' } }, 'Privacy')
       ),
@@ -1427,13 +1427,13 @@ function AdminDashboard({ user, navigate }) {
     // Tabs
     React.createElement('div', { style: { display: 'flex', gap: 4, marginBottom: 24, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' } },
       (isSiteOwner
-        ? ['overview', 'users', 'hosts', 'tunnels', 'activity', 'reserved']
+        ? ['overview', 'users', 'hosts', 'tunnels', 'activity', 'reserved', 'backup']
         : ['overview', 'users', 'hosts', 'tunnels', 'activity']
       ).map(t =>
         React.createElement('button', {
           key: t, onClick: () => setTab(t),
           style: { padding: '10px 18px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: tab === t ? 'var(--text)' : 'var(--text2)', borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent', marginBottom: -1 }
-        }, t === 'reserved' ? '🔒 Reserved' : t === 'activity' ? '📋 Activity' : t.charAt(0).toUpperCase() + t.slice(1))
+        }, t === 'reserved' ? '🔒 Reserved' : t === 'activity' ? '📋 Activity' : t === 'backup' ? '💾 Backup' : t.charAt(0).toUpperCase() + t.slice(1))
       )
     ),
 
@@ -1564,6 +1564,9 @@ function AdminDashboard({ user, navigate }) {
 
     // Reserved subdomains tab
     tab === 'reserved' && isSiteOwner && React.createElement(ReservedPanel, { key: reservedKey }),
+
+    // Backup tab
+    tab === 'backup' && isSiteOwner && React.createElement(BackupPanel),
 
     // Edit user modal
     editUser && React.createElement(EditUserModal, {
@@ -1774,6 +1777,80 @@ function ReservedPanel() {
             )
           ))
         )
+      )
+    )
+  );
+}
+
+// ── Backup Panel ──────────────────────────────────────────────────────────────
+function BackupPanel() {
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  const handleExport = async () => {
+    setExporting(true); setError('');
+    try {
+      const res = await fetch('/api/admin/backup', { headers: API.headers() });
+      if (!res.ok) throw new Error('Backup failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rslvd-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setResult({ type: 'export', message: 'Backup downloaded successfully' });
+    } catch (e) { setError(e.message); }
+    finally { setExporting(false); }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('This will import data from the backup file. Existing records with the same ID will be skipped. Continue?')) {
+      e.target.value = ''; return;
+    }
+    setImporting(true); setError(''); setResult(null);
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      if (!backup.data) throw new Error('Invalid backup file format');
+      const res = await API.post('/admin/restore', backup);
+      setResult({ type: 'import', message: `Restored: ${res.results.users} users, ${res.results.hosts} hosts, ${res.results.tunnels} tunnels, ${res.results.reserved} reserved. Skipped ${res.results.skipped} existing.` });
+    } catch (e) { setError(e.message); }
+    finally { setImporting(false); e.target.value = ''; }
+  };
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'card mb-4' },
+      React.createElement('h3', { style: { marginBottom: 8 } }, 'Database Backup'),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 13, marginBottom: 20 } },
+        'Export all users, hosts, tunnels, reserved subdomains, and activity logs as a JSON file. Use this to create periodic backups or migrate data.'
+      ),
+      error && React.createElement(Alert, null, error),
+      result && React.createElement(Alert, { type: 'success' }, result.message),
+      React.createElement('div', { style: { display: 'flex', gap: 16, flexWrap: 'wrap' } },
+        React.createElement('button', { className: 'btn btn-primary', onClick: handleExport, disabled: exporting },
+          exporting ? React.createElement(Spinner) : '⬇ Export Backup'
+        ),
+        React.createElement('div', null,
+          React.createElement('input', { type: 'file', accept: '.json', ref: fileRef, onChange: handleImport, style: { display: 'none' } }),
+          React.createElement('button', { className: 'btn btn-secondary', onClick: () => fileRef.current.click(), disabled: importing },
+            importing ? React.createElement(Spinner) : '⬆ Import Backup'
+          )
+        )
+      )
+    ),
+    React.createElement('div', { className: 'card' },
+      React.createElement('h3', { style: { marginBottom: 12 } }, 'How it works'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', lineHeight: 1.8 } },
+        React.createElement('p', null, '• Export downloads a full JSON snapshot of the database (users, hosts, tunnels, reserved subdomains, activity logs).'),
+        React.createElement('p', null, '• Import inserts records that don\'t already exist (matched by ID or email). It will NOT overwrite existing data.'),
+        React.createElement('p', null, '• Passwords are stored hashed — restoring a backup preserves the original password hashes.'),
+        React.createElement('p', null, '• Activity logs are capped at the most recent 10,000 entries in exports.')
       )
     )
   );
@@ -3473,6 +3550,143 @@ function ComposeModal({ acctId, fromAddress, initial, onClose, onSent }) {
   );
 }
 
+// ── Downloads Page ────────────────────────────────────────────────────────────
+function DownloadsPage({ navigate }) {
+  const VERSION = '1.2.0';
+  const BASE = '/dl';
+
+  const platforms = [
+    {
+      id: 'linux',
+      icon: '🐧',
+      name: 'Linux',
+      desc: 'Debian/Ubuntu (.deb), or standalone binary. Supports amd64, arm64, arm, mips.',
+      downloads: [
+        { label: 'Installer (.deb) — amd64', file: `rslvd-tunnel_${VERSION}_amd64.deb`, size: '780 KB', recommended: true },
+        { label: 'Installer (.deb) — arm64', file: `rslvd-tunnel_${VERSION}_arm64.deb`, size: '700 KB' },
+        { label: 'Binary — amd64', file: 'rslvd-tunnel-linux-amd64', size: '2.0 MB' },
+        { label: 'Binary — arm64', file: 'rslvd-tunnel-linux-arm64', size: '2.0 MB' },
+        { label: 'Binary — arm (32-bit)', file: 'rslvd-tunnel-linux-arm', size: '1.9 MB' },
+        { label: 'Binary — mips', file: 'rslvd-tunnel-linux-mips', size: '2.3 MB' },
+        { label: 'Binary — mipsle', file: 'rslvd-tunnel-linux-mipsle', size: '2.3 MB' },
+      ],
+      install: 'curl -fsSL https://rslvd.net/install.sh | bash',
+    },
+    {
+      id: 'windows',
+      icon: '🪟',
+      name: 'Windows',
+      desc: 'Installer (.exe) with PATH setup and uninstaller, or standalone portable binary.',
+      downloads: [
+        { label: 'Installer (.exe) — amd64', file: 'rslvd-tunnel-setup-windows-amd64.exe', size: '1.0 MB', recommended: true },
+        { label: 'Portable Binary (.exe) — amd64', file: 'rslvd-tunnel-windows-amd64.exe', size: '2.1 MB' },
+      ],
+    },
+    {
+      id: 'macos',
+      icon: '🍎',
+      name: 'macOS',
+      desc: 'Universal binary for Intel and Apple Silicon Macs.',
+      downloads: [
+        { label: 'Binary — Apple Silicon (arm64)', file: 'rslvd-tunnel-darwin-arm64', size: '2.0 MB', recommended: true },
+        { label: 'Binary — Intel (amd64)', file: 'rslvd-tunnel-darwin-amd64', size: '2.0 MB' },
+      ],
+      install: 'curl -fsSL https://rslvd.net/install.sh | bash',
+    },
+    {
+      id: 'router',
+      icon: '📡',
+      name: 'Routers (OpenWRT / DD-WRT)',
+      desc: 'MIPS and ARM builds for embedded routers. Use the installer scripts for auto-detection.',
+      downloads: [
+        { label: 'Binary — mips (big endian)', file: 'rslvd-tunnel-linux-mips', size: '2.3 MB' },
+        { label: 'Binary — mipsle (little endian)', file: 'rslvd-tunnel-linux-mipsle', size: '2.3 MB' },
+        { label: 'Binary — arm', file: 'rslvd-tunnel-linux-arm', size: '1.9 MB' },
+      ],
+      install: 'wget -O- https://rslvd.net/install-openwrt.sh | sh',
+    },
+  ];
+
+  return React.createElement('div', { style: { maxWidth: 900, margin: '0 auto', padding: '40px 20px' } },
+    React.createElement('h1', { style: { fontSize: 28, marginBottom: 8 } }, '⬇ Downloads'),
+    React.createElement('p', { style: { color: 'var(--text2)', marginBottom: 8, fontSize: 14 } },
+      'rslvd-tunnel v', VERSION, ' — Dynamic DNS + CGNAT tunnel client'
+    ),
+    React.createElement('p', { style: { color: 'var(--text3)', marginBottom: 32, fontSize: 13 } },
+      'Single binary, no dependencies. Supports TCP, UDP, and DNS2TCP tunneling modes.'
+    ),
+
+    // Quick install box
+    React.createElement('div', { className: 'card', style: { marginBottom: 32, background: 'var(--bg2)', border: '1px solid var(--accent)', borderRadius: 8 } },
+      React.createElement('h3', { style: { marginBottom: 8, fontSize: 15 } }, '⚡ One-line install (Linux / macOS)'),
+      React.createElement(CopyBox, { text: 'curl -fsSL https://rslvd.net/install.sh | bash' }),
+      React.createElement('p', { style: { fontSize: 12, color: 'var(--text3)', marginTop: 8 } },
+        'Auto-detects your OS and architecture. Installs to ~/.local/bin.'
+      )
+    ),
+
+    // Platform sections
+    platforms.map(p =>
+      React.createElement('div', { key: p.id, className: 'card', style: { marginBottom: 24 } },
+        React.createElement('h2', { style: { fontSize: 20, marginBottom: 4 } }, p.icon, ' ', p.name),
+        React.createElement('p', { style: { color: 'var(--text2)', fontSize: 13, marginBottom: 16 } }, p.desc),
+        p.install && React.createElement('div', { style: { marginBottom: 16 } },
+          React.createElement('div', { style: { fontSize: 12, color: 'var(--text3)', marginBottom: 4 } }, 'Quick install:'),
+          React.createElement(CopyBox, { text: p.install })
+        ),
+        React.createElement('div', { style: { display: 'grid', gap: 8 } },
+          p.downloads.map(d =>
+            React.createElement('a', {
+              key: d.file,
+              href: `${BASE}/${d.file}`,
+              style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', background: 'var(--bg2)', borderRadius: 6, textDecoration: 'none', color: 'var(--text)', border: d.recommended ? '1px solid var(--accent)' : '1px solid var(--border)', transition: 'border-color 0.2s' }
+            },
+              React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+                React.createElement('span', { style: { fontSize: 14, fontWeight: d.recommended ? 600 : 400 } }, d.label),
+                d.recommended && React.createElement('span', { style: { fontSize: 11, background: 'var(--accent)', color: '#fff', padding: '2px 8px', borderRadius: 4 } }, 'Recommended')
+              ),
+              React.createElement('span', { style: { fontSize: 12, color: 'var(--text3)' } }, d.size)
+            )
+          )
+        )
+      )
+    ),
+
+    // System requirements
+    React.createElement('div', { className: 'card', style: { marginTop: 16 } },
+      React.createElement('h3', { style: { marginBottom: 12 } }, 'System requirements'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', lineHeight: 1.8 } },
+        React.createElement('p', null, '• Linux: kernel 2.6+ (any modern distro)'),
+        React.createElement('p', null, '• Windows: Windows 7 or later (64-bit)'),
+        React.createElement('p', null, '• macOS: 10.15 Catalina or later'),
+        React.createElement('p', null, '• Routers: OpenWRT 19.07+ or DD-WRT with USB storage'),
+        React.createElement('p', null, '• RAM: ~5 MB per tunnel connection'),
+        React.createElement('p', null, '• Network: outbound TCP/UDP access (no inbound ports required)')
+      )
+    ),
+
+    // After install
+    React.createElement('div', { className: 'card', style: { marginTop: 24 } },
+      React.createElement('h3', { style: { marginBottom: 12 } }, 'After installing'),
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', lineHeight: 1.8 } },
+        React.createElement('p', null, '1. ', React.createElement('a', { href: '/register', onClick: e => { e.preventDefault(); navigate('/register'); }, style: { color: 'var(--accent2)' } }, 'Create a free account'), ' if you haven\'t already.'),
+        React.createElement('p', null, '2. Create a tunnel from your ', React.createElement('a', { href: '/dashboard', onClick: e => { e.preventDefault(); navigate('/dashboard'); }, style: { color: 'var(--accent2)' } }, 'Dashboard'), '.'),
+        React.createElement('p', null, '3. Run: ', React.createElement('code', { style: { background: 'var(--bg2)', padding: '2px 6px', borderRadius: 3 } }, 'rslvd-tunnel YOUR_TOKEN 8080')),
+        React.createElement('p', null, '4. Your service is now live at ', React.createElement('code', { style: { background: 'var(--bg2)', padding: '2px 6px', borderRadius: 3 } }, 'yourname.rslvd.net'), '!')
+      )
+    ),
+
+    // Tutorials link
+    React.createElement('div', { style: { textAlign: 'center', marginTop: 32 } },
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } },
+        'Need help? Check the ',
+        React.createElement('a', { href: '/tutorials', onClick: e => { e.preventDefault(); navigate('/tutorials'); }, style: { color: 'var(--accent2)' } }, 'step-by-step tutorials'),
+        '.'
+      )
+    )
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const { path, navigate } = useRoute();
@@ -3506,7 +3720,8 @@ function App() {
     path === '/tutorials/linux-tunnel' && React.createElement(TutorialLinuxTunnel, { navigate }),
     path === '/tutorials/windows-tunnel' && React.createElement(TutorialWindowsTunnel, { navigate }),
     path === '/webmail' && auth.user && React.createElement(WebmailPage, { user: auth.user, navigate }),
-    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel', '/webmail'].includes(path) &&
+    path === '/downloads' && React.createElement(DownloadsPage, { navigate }),
+    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel', '/webmail', '/downloads'].includes(path) &&
       React.createElement('div', { className: 'flex-center', style: { minHeight: 400, flexDirection: 'column', gap: 16 } },
         React.createElement('h1', null, '404'),
         React.createElement('p', { style: { color: 'var(--text2)' } }, 'Page not found'),

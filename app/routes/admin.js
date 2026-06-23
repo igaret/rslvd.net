@@ -202,4 +202,135 @@ router.get('/config', requireSiteOwner, async (req, res) => {
   });
 });
 
+// ── Backup / Restore (site_owner only) ───────────────────────────────────────
+router.get('/backup', requireSiteOwner, async (req, res) => {
+  try {
+    const [users, hosts, tunnels, reserved, activity] = await Promise.all([
+      pool.query(`SELECT id, email, password_hash, stripe_customer_id, subscription_id,
+                         subscription_status, plan, plan_expires_at, max_hosts, max_tunnels,
+                         is_admin, is_site_owner, display_name, totp_secret, totp_enabled,
+                         created_at, updated_at FROM users ORDER BY created_at`),
+      pool.query(`SELECT id, user_id, hostname, parent_host_id, fqdn, ip_address, ipv6_address,
+                         ionos_record_id_v4, ionos_record_id_v6, last_updated, update_key, active,
+                         force_https, created_at FROM hosts ORDER BY created_at`),
+      pool.query(`SELECT id, user_id, name, tunnel_port, target_host, target_port, protocol,
+                         wg_public_key, wg_preshared_key, wg_client_ip, wg_server_port, status,
+                         fqdn, ionos_record_id, token, active, force_https, parent_tunnel_id,
+                         created_at FROM tunnels ORDER BY created_at`),
+      pool.query(`SELECT id, subdomain, reason, created_by, created_at FROM reserved_subdomains ORDER BY subdomain`),
+      pool.query(`SELECT id, user_id, event, detail, ip_address, user_agent, created_at
+                  FROM activity_logs ORDER BY created_at DESC LIMIT 10000`),
+    ]);
+    const backup = {
+      version: 1,
+      created_at: new Date().toISOString(),
+      data: {
+        users: users.rows,
+        hosts: hosts.rows,
+        tunnels: tunnels.rows,
+        reserved_subdomains: reserved.rows,
+        activity_logs: activity.rows,
+      },
+    };
+    res.setHeader('Content-Disposition', `attachment; filename="rslvd-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json(backup);
+  } catch (err) {
+    console.error('Backup error:', err);
+    res.status(500).json({ error: 'Failed to create backup' });
+  }
+});
+
+router.post('/restore', requireSiteOwner, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { data } = req.body;
+    if (!data || !data.users || !data.hosts || !data.tunnels) {
+      return res.status(400).json({ error: 'Invalid backup format' });
+    }
+
+    await client.query('BEGIN');
+
+    // Track results
+    const results = { users: 0, hosts: 0, tunnels: 0, reserved: 0, skipped: 0 };
+
+    // Restore users (upsert by email)
+    for (const u of data.users) {
+      const exists = await client.query('SELECT id FROM users WHERE email = $1', [u.email]);
+      if (exists.rows.length === 0) {
+        await client.query(
+          `INSERT INTO users (id, email, password_hash, stripe_customer_id, subscription_id,
+                              subscription_status, plan, plan_expires_at, max_hosts, max_tunnels,
+                              is_admin, is_site_owner, display_name, totp_secret, totp_enabled,
+                              created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+           ON CONFLICT (id) DO NOTHING`,
+          [u.id, u.email, u.password_hash, u.stripe_customer_id, u.subscription_id,
+           u.subscription_status, u.plan, u.plan_expires_at, u.max_hosts, u.max_tunnels,
+           u.is_admin, u.is_site_owner, u.display_name, u.totp_secret, u.totp_enabled || false,
+           u.created_at, u.updated_at]
+        );
+        results.users++;
+      } else {
+        results.skipped++;
+      }
+    }
+
+    // Restore hosts
+    for (const h of data.hosts) {
+      const hRes = await client.query(
+        `INSERT INTO hosts (id, user_id, hostname, parent_host_id, fqdn, ip_address, ipv6_address,
+                            ionos_record_id_v4, ionos_record_id_v6, last_updated, update_key, active,
+                            force_https, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         ON CONFLICT (id) DO NOTHING RETURNING id`,
+        [h.id, h.user_id, h.hostname, h.parent_host_id, h.fqdn, h.ip_address, h.ipv6_address,
+         h.ionos_record_id_v4, h.ionos_record_id_v6, h.last_updated, h.update_key, h.active,
+         h.force_https !== false, h.created_at]
+      );
+      if (hRes.rows.length > 0) results.hosts++;
+      else results.skipped++;
+    }
+
+    // Restore tunnels
+    for (const t of data.tunnels) {
+      const tRes = await client.query(
+        `INSERT INTO tunnels (id, user_id, name, tunnel_port, target_host, target_port, protocol,
+                              wg_public_key, wg_preshared_key, wg_client_ip, wg_server_port, status,
+                              fqdn, ionos_record_id, token, active, force_https, parent_tunnel_id, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         ON CONFLICT (id) DO NOTHING RETURNING id`,
+        [t.id, t.user_id, t.name, t.tunnel_port, t.target_host, t.target_port, t.protocol,
+         t.wg_public_key, t.wg_preshared_key, t.wg_client_ip, t.wg_server_port, t.status,
+         t.fqdn, t.ionos_record_id, t.token, t.active, t.force_https !== false,
+         t.parent_tunnel_id, t.created_at]
+      );
+      if (tRes.rows.length > 0) results.tunnels++;
+      else results.skipped++;
+    }
+
+    // Restore reserved subdomains
+    if (data.reserved_subdomains) {
+      for (const r of data.reserved_subdomains) {
+        const rRes = await client.query(
+          `INSERT INTO reserved_subdomains (subdomain, reason, created_by, created_at)
+           VALUES ($1, $2, $3, $4) ON CONFLICT (subdomain) DO NOTHING RETURNING subdomain`,
+          [r.subdomain, r.reason, r.created_by, r.created_at]
+        );
+        if (rRes.rows.length > 0) results.reserved++;
+        else results.skipped++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, results });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Restore error:', err);
+    res.status(500).json({ error: 'Restore failed: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

@@ -96,6 +96,7 @@ function Nav({ user, logout, navigate, pwa }) {
         (user.role === 'site_owner' || user.role === 'admin') &&
           React.createElement('button', { key: 'adm', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/admin') }, 'Admin'),
         React.createElement('button', { key: 'dash', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/dashboard') }, 'Dashboard'),
+        React.createElement('button', { key: 'mail', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/webmail') }, '📧 Mail'),
         React.createElement('button', { key: 'acct', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/account') }, '⚙️ Account'),
         React.createElement('button', { key: 'out', className: 'btn btn-secondary btn-sm', onClick: () => { logout(); navigate('/'); } }, 'Sign out'),
       ] : [
@@ -2882,6 +2883,596 @@ function TutorialsPage({ navigate }) {
   );
 }
 
+// ── Webmail ───────────────────────────────────────────────────────────────────
+
+function WebmailPage({ user, navigate }) {
+  const [accounts, setAccounts] = useState([]);
+  const [activeAcct, setActiveAcct] = useState(null);
+  const [mailboxes, setMailboxes] = useState([]);
+  const [folder, setFolder] = useState('INBOX');
+  const [messages, setMessages] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(0);
+  const [reading, setReading] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [msgLoading, setMsgLoading] = useState(false);
+  const [readLoading, setReadLoading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
+  const [composeData, setComposeData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    API.get('/mail/accounts').then(a => {
+      setAccounts(a);
+      if (a.length > 0) setActiveAcct(a[0]);
+    }).catch(e => setError(e.message)).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!activeAcct) return;
+    setFolder('INBOX');
+    setMessages([]);
+    setReading(null);
+    setPage(1);
+    if (activeAcct.protocol === 'imap' && activeAcct.imap_host) {
+      API.get(`/mail/accounts/${activeAcct.id}/mailboxes`).then(setMailboxes).catch(() => setMailboxes([]));
+    } else {
+      setMailboxes([]);
+    }
+  }, [activeAcct]);
+
+  useEffect(() => {
+    if (!activeAcct) return;
+    setMsgLoading(true);
+    setReading(null);
+    API.get(`/mail/accounts/${activeAcct.id}/messages?folder=${encodeURIComponent(folder)}&page=${page}`)
+      .then(d => { setMessages(d.messages); setTotal(d.total); setPages(d.pages); })
+      .catch(e => setError(e.message))
+      .finally(() => setMsgLoading(false));
+  }, [activeAcct, folder, page]);
+
+  const openMessage = async (uid) => {
+    setReadLoading(true);
+    try {
+      const msg = await API.get(`/mail/accounts/${activeAcct.id}/messages/${uid}?folder=${encodeURIComponent(folder)}`);
+      setReading(msg);
+      setMessages(ms => ms.map(m => m.uid === uid ? { ...m, flags: [...new Set([...(m.flags || []), '\\Seen'])] } : m));
+    } catch (e) { setError(e.message); }
+    setReadLoading(false);
+  };
+
+  const deleteMessage = async (uid) => {
+    if (!confirm('Delete this message?')) return;
+    try {
+      await API.del(`/mail/accounts/${activeAcct.id}/messages/${uid}?folder=${encodeURIComponent(folder)}`);
+      setMessages(ms => ms.filter(m => m.uid !== uid));
+      if (reading && reading.uid === uid) setReading(null);
+    } catch (e) { setError(e.message); }
+  };
+
+  const toggleFlag = async (uid, flag) => {
+    const msg = messages.find(m => m.uid === uid);
+    const has = msg && msg.flags && msg.flags.includes(flag);
+    try {
+      await API.post(`/mail/accounts/${activeAcct.id}/messages/${uid}/flag?folder=${encodeURIComponent(folder)}`, { flag, add: !has });
+      setMessages(ms => ms.map(m => m.uid === uid ? { ...m, flags: has ? m.flags.filter(f => f !== flag) : [...(m.flags || []), flag] } : m));
+    } catch (e) { setError(e.message); }
+  };
+
+  const onAccountAdded = (acct) => {
+    setAccounts(a => [...a, acct]);
+    if (!activeAcct) setActiveAcct(acct);
+    setShowAdd(false);
+  };
+
+  const deleteAccount = async (id) => {
+    if (!confirm('Remove this email account?')) return;
+    try {
+      await API.del(`/mail/accounts/${id}`);
+      setAccounts(a => a.filter(x => x.id !== id));
+      if (activeAcct && activeAcct.id === id) {
+        const remaining = accounts.filter(x => x.id !== id);
+        setActiveAcct(remaining.length > 0 ? remaining[0] : null);
+        setMessages([]);
+        setReading(null);
+        setMailboxes([]);
+      }
+    } catch (e) { setError(e.message); }
+  };
+
+  const startReply = (msg, all) => {
+    const from = msg.from && msg.from[0] ? (msg.from[0].address || msg.from[0].name || '') : '';
+    const toList = all ? [from, ...(msg.to || []).filter(t => t.address !== activeAcct.email_address).map(t => t.address)].filter(Boolean).join(', ') : from;
+    setComposeData({
+      to: toList,
+      subject: msg.subject && msg.subject.startsWith('Re:') ? msg.subject : 'Re: ' + (msg.subject || ''),
+      text: '\n\n--- Original Message ---\nFrom: ' + from + '\nDate: ' + (msg.date ? new Date(msg.date).toLocaleString() : '') + '\n\n' + (msg.text || ''),
+      inReplyTo: msg.messageId || '',
+      references: msg.messageId || ''
+    });
+    setShowCompose(true);
+  };
+
+  const startForward = (msg) => {
+    setComposeData({
+      to: '',
+      subject: msg.subject && msg.subject.startsWith('Fwd:') ? msg.subject : 'Fwd: ' + (msg.subject || ''),
+      text: '\n\n--- Forwarded Message ---\nFrom: ' + ((msg.from && msg.from[0]) ? (msg.from[0].address || '') : '') + '\nDate: ' + (msg.date ? new Date(msg.date).toLocaleString() : '') + '\nSubject: ' + (msg.subject || '') + '\n\n' + (msg.text || '')
+    });
+    setShowCompose(true);
+  };
+
+  if (loading) return React.createElement('div', { className: 'flex-center', style: { minHeight: 400 } }, React.createElement(Spinner));
+
+  const folderIcons = { 'INBOX': '📥', '\\Sent': '📤', '\\Drafts': '📝', '\\Trash': '🗑️', '\\Junk': '⚠️', '\\Archive': '📦' };
+  const getFolderIcon = (box) => {
+    if (box.specialUse && folderIcons[box.specialUse]) return folderIcons[box.specialUse];
+    if (/inbox/i.test(box.name)) return '📥';
+    if (/sent/i.test(box.name)) return '📤';
+    if (/draft/i.test(box.name)) return '📝';
+    if (/trash|deleted/i.test(box.name)) return '🗑️';
+    if (/spam|junk/i.test(box.name)) return '⚠️';
+    if (/archive/i.test(box.name)) return '📦';
+    return '📁';
+  };
+
+  return React.createElement('div', { className: 'dashboard' },
+    error && React.createElement(Alert, { type: 'error' }, error, React.createElement('button', {
+      onClick: () => setError(''), style: { marginLeft: 8, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontWeight: 'bold' }
+    }, '×')),
+
+    React.createElement('div', { className: 'dashboard-header' },
+      React.createElement('div', null,
+        React.createElement('h1', { style: { fontSize: 24, marginBottom: 4 } }, '📧 Webmail'),
+        React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, 'Read and send email from your accounts')
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: 8 } },
+        React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => { setComposeData(null); setShowCompose(true); } }, '✉️ Compose'),
+        React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => setShowAdd(true) }, '+ Add account'),
+        React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => navigate('/dashboard') }, '← Dashboard')
+      )
+    ),
+
+    accounts.length === 0
+      ? React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 48 } },
+          React.createElement('div', { style: { fontSize: 48, marginBottom: 16 } }, '📧'),
+          React.createElement('h3', { style: { marginBottom: 8 } }, 'No email accounts'),
+          React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 16 } }, 'Add an IMAP, SMTP, or POP3 email account to get started.'),
+          React.createElement('button', { className: 'btn btn-primary', onClick: () => setShowAdd(true) }, '+ Add email account')
+        )
+      : React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '220px 1fr', gap: 16, minHeight: 500 } },
+
+          // ── Sidebar ──
+          React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+            // Account selector
+            React.createElement('div', { className: 'card', style: { padding: 12 } },
+              React.createElement('div', { style: { fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 } }, 'Account'),
+              accounts.map(a => React.createElement('div', {
+                key: a.id,
+                onClick: () => setActiveAcct(a),
+                style: {
+                  padding: '8px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, marginBottom: 4,
+                  background: activeAcct && activeAcct.id === a.id ? 'var(--accent-bg)' : 'transparent',
+                  color: activeAcct && activeAcct.id === a.id ? 'var(--accent2)' : 'var(--text)',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }
+              },
+                React.createElement('div', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } },
+                  React.createElement('div', { style: { fontWeight: 600 } }, a.label),
+                  React.createElement('div', { style: { fontSize: 11, color: 'var(--text3)' } }, a.email_address)
+                ),
+                React.createElement('button', {
+                  onClick: (e) => { e.stopPropagation(); deleteAccount(a.id); },
+                  style: { background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }
+                }, '×')
+              ))
+            ),
+
+            // Folder list
+            mailboxes.length > 0 && React.createElement('div', { className: 'card', style: { padding: 12 } },
+              React.createElement('div', { style: { fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 } }, 'Folders'),
+              mailboxes.map(b => React.createElement('div', {
+                key: b.path,
+                onClick: () => { setFolder(b.path); setPage(1); },
+                style: {
+                  padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13, marginBottom: 2,
+                  background: folder === b.path ? 'var(--accent-bg)' : 'transparent',
+                  color: folder === b.path ? 'var(--accent2)' : 'var(--text)',
+                  display: 'flex', alignItems: 'center', gap: 8
+                }
+              },
+                React.createElement('span', null, getFolderIcon(b)),
+                React.createElement('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, b.name)
+              ))
+            )
+          ),
+
+          // ── Main content ──
+          React.createElement('div', null,
+            reading
+              ? React.createElement(MessageReader, {
+                  msg: reading, acctId: activeAcct.id, folder,
+                  onBack: () => setReading(null),
+                  onDelete: () => { deleteMessage(reading.uid); setReading(null); },
+                  onReply: () => startReply(reading, false),
+                  onReplyAll: () => startReply(reading, true),
+                  onForward: () => startForward(reading),
+                  loading: readLoading
+                })
+              : React.createElement(MessageList, {
+                  messages, total, page, pages, msgLoading,
+                  onOpen: openMessage,
+                  onDelete: deleteMessage,
+                  onToggleFlag: toggleFlag,
+                  onPageChange: setPage,
+                  folder,
+                  onRefresh: () => {
+                    setMsgLoading(true);
+                    API.get(`/mail/accounts/${activeAcct.id}/messages?folder=${encodeURIComponent(folder)}&page=${page}`)
+                      .then(d => { setMessages(d.messages); setTotal(d.total); setPages(d.pages); })
+                      .catch(e => setError(e.message))
+                      .finally(() => setMsgLoading(false));
+                  }
+                })
+          )
+        ),
+
+    showAdd && React.createElement(AddEmailAccountModal, { onClose: () => setShowAdd(false), onAdded: onAccountAdded }),
+    showCompose && activeAcct && React.createElement(ComposeModal, {
+      acctId: activeAcct.id, fromAddress: activeAcct.email_address,
+      initial: composeData,
+      onClose: () => { setShowCompose(false); setComposeData(null); },
+      onSent: () => {
+        setShowCompose(false); setComposeData(null);
+        if (folder.toLowerCase().includes('sent')) {
+          setMsgLoading(true);
+          API.get(`/mail/accounts/${activeAcct.id}/messages?folder=${encodeURIComponent(folder)}&page=${page}`)
+            .then(d => { setMessages(d.messages); setTotal(d.total); setPages(d.pages); })
+            .finally(() => setMsgLoading(false));
+        }
+      }
+    })
+  );
+}
+
+function MessageList({ messages, total, page, pages, msgLoading, onOpen, onDelete, onToggleFlag, onPageChange, folder, onRefresh }) {
+  const formatDate = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    const now = new Date();
+    if (dt.toDateString() === now.toDateString()) return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (now - dt < 7 * 86400000) return dt.toLocaleDateString([], { weekday: 'short' });
+    return dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+  const formatFrom = (from) => {
+    if (!from || from.length === 0) return '(unknown)';
+    const f = from[0];
+    return f.name || f.address || '(unknown)';
+  };
+
+  return React.createElement('div', null,
+    React.createElement('div', { className: 'flex-between mb-4' },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+        React.createElement('h2', { className: 'section-title', style: { margin: 0 } }, folder),
+        React.createElement('span', { style: { color: 'var(--text3)', fontSize: 13 } }, total + ' messages')
+      ),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onRefresh, disabled: msgLoading }, msgLoading ? 'Loading...' : '↻ Refresh')
+    ),
+
+    msgLoading && messages.length === 0
+      ? React.createElement('div', { className: 'flex-center', style: { padding: 48 } }, React.createElement(Spinner))
+      : messages.length === 0
+        ? React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 48 } },
+            React.createElement('div', { style: { fontSize: 40, marginBottom: 12 } }, '📭'),
+            React.createElement('h3', { style: { marginBottom: 8 } }, 'No messages'),
+            React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, 'This folder is empty.')
+          )
+        : React.createElement('div', { className: 'card', style: { padding: 0, overflow: 'hidden' } },
+            messages.map((m, i) => {
+              const seen = m.flags && m.flags.includes('\\Seen');
+              const flagged = m.flags && m.flags.includes('\\Flagged');
+              return React.createElement('div', {
+                key: m.uid,
+                onClick: () => onOpen(m.uid),
+                style: {
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', cursor: 'pointer',
+                  borderBottom: i < messages.length - 1 ? '1px solid var(--border)' : 'none',
+                  background: seen ? 'transparent' : 'rgba(108,99,255,0.04)',
+                  fontWeight: seen ? 400 : 600
+                },
+                onMouseEnter: e => e.currentTarget.style.background = 'var(--bg2)',
+                onMouseLeave: e => e.currentTarget.style.background = seen ? 'transparent' : 'rgba(108,99,255,0.04)'
+              },
+                React.createElement('div', { style: { width: 8, height: 8, borderRadius: '50%', background: seen ? 'transparent' : 'var(--accent)', flexShrink: 0 } }),
+                React.createElement('div', { style: { width: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 } }, formatFrom(m.from)),
+                React.createElement('div', { style: { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: seen ? 'var(--text2)' : 'var(--text)' } }, m.subject),
+                React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 } },
+                  React.createElement('button', {
+                    onClick: (e) => { e.stopPropagation(); onToggleFlag(m.uid, '\\Flagged'); },
+                    style: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, padding: 2 },
+                    title: flagged ? 'Unflag' : 'Flag'
+                  }, flagged ? '⭐' : '☆'),
+                  React.createElement('button', {
+                    onClick: (e) => { e.stopPropagation(); onDelete(m.uid); },
+                    style: { background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--text3)', padding: 2 },
+                    title: 'Delete'
+                  }, '🗑️'),
+                  React.createElement('span', { style: { fontSize: 12, color: 'var(--text3)', minWidth: 60, textAlign: 'right' } }, formatDate(m.date))
+                )
+              );
+            })
+          ),
+
+    pages > 1 && React.createElement('div', { style: { display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 } },
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', disabled: page <= 1, onClick: () => onPageChange(page - 1) }, '← Prev'),
+      React.createElement('span', { style: { padding: '6px 12px', fontSize: 13, color: 'var(--text2)' } }, `Page ${page} of ${pages}`),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', disabled: page >= pages, onClick: () => onPageChange(page + 1) }, 'Next →')
+    )
+  );
+}
+
+function MessageReader({ msg, acctId, folder, onBack, onDelete, onReply, onReplyAll, onForward, loading }) {
+  const iframeRef = useRef(null);
+
+  useEffect(() => {
+    if (msg && msg.html && iframeRef.current) {
+      const doc = iframeRef.current.contentDocument;
+      doc.open();
+      doc.write(`<html><head><style>body{font-family:sans-serif;font-size:14px;color:#e0e0e0;background:#1a1a2e;margin:12px;line-height:1.6;}a{color:#6c63ff;}img{max-width:100%;height:auto;}</style></head><body>${msg.html}</body></html>`);
+      doc.close();
+      setTimeout(() => {
+        if (iframeRef.current) iframeRef.current.style.height = (doc.body.scrollHeight + 32) + 'px';
+      }, 100);
+    }
+  }, [msg]);
+
+  if (loading) return React.createElement('div', { className: 'flex-center', style: { padding: 48 } }, React.createElement(Spinner));
+  if (!msg) return null;
+
+  const formatAddr = (list) => {
+    if (!list || list.length === 0) return '(none)';
+    return list.map(a => a.name ? `${a.name} <${a.address}>` : a.address).join(', ');
+  };
+
+  return React.createElement('div', null,
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' } },
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onBack }, '← Back'),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onReply }, '↩ Reply'),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onReplyAll }, '↩↩ Reply All'),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onForward }, '↪ Forward'),
+      React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: onDelete, style: { color: '#e74c3c' } }, '🗑️ Delete')
+    ),
+
+    React.createElement('div', { className: 'card' },
+      React.createElement('h2', { style: { fontSize: 18, marginBottom: 16 } }, msg.subject),
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px', fontSize: 13, color: 'var(--text2)', marginBottom: 16 } },
+        React.createElement('strong', null, 'From:'), React.createElement('span', null, formatAddr(msg.from)),
+        React.createElement('strong', null, 'To:'), React.createElement('span', null, formatAddr(msg.to)),
+        msg.cc && msg.cc.length > 0 && React.createElement('strong', null, 'Cc:'),
+        msg.cc && msg.cc.length > 0 && React.createElement('span', null, formatAddr(msg.cc)),
+        React.createElement('strong', null, 'Date:'), React.createElement('span', null, msg.date ? new Date(msg.date).toLocaleString() : '')
+      ),
+
+      msg.attachments && msg.attachments.length > 0 && React.createElement('div', { style: { marginBottom: 16, padding: '8px 12px', background: 'var(--bg2)', borderRadius: 6 } },
+        React.createElement('div', { style: { fontSize: 12, color: 'var(--text3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 } }, `${msg.attachments.length} attachment(s)`),
+        msg.attachments.map((a, i) => React.createElement('a', {
+          key: i,
+          href: `/api/mail/accounts/${acctId}/messages/${msg.uid}/attachment/${i}?folder=${encodeURIComponent(folder)}`,
+          target: '_blank',
+          style: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--accent2)', fontSize: 13, textDecoration: 'none', marginRight: 8, marginBottom: 4 }
+        }, '📎 ', a.filename || 'attachment', a.size ? ` (${(a.size / 1024).toFixed(1)} KB)` : ''))
+      ),
+
+      React.createElement('div', { style: { borderTop: '1px solid var(--border)', paddingTop: 16 } },
+        msg.html
+          ? React.createElement('iframe', {
+              ref: iframeRef,
+              sandbox: 'allow-same-origin',
+              style: { width: '100%', border: 'none', minHeight: 200 }
+            })
+          : React.createElement('pre', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, margin: 0 } }, msg.text || '(empty)')
+      )
+    )
+  );
+}
+
+function AddEmailAccountModal({ onClose, onAdded }) {
+  const [form, setForm] = useState({
+    label: '', email_address: '', protocol: 'imap',
+    imap_host: '', imap_port: 993, imap_tls: true,
+    smtp_host: '', smtp_port: 587, smtp_tls: true,
+    pop3_host: '', pop3_port: 995, pop3_tls: true,
+    username: '', password: ''
+  });
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const presets = [
+    { name: 'Gmail', imap_host: 'imap.gmail.com', smtp_host: 'smtp.gmail.com', pop3_host: 'pop.gmail.com', imap_port: 993, smtp_port: 587, pop3_port: 995 },
+    { name: 'Outlook', imap_host: 'outlook.office365.com', smtp_host: 'smtp.office365.com', pop3_host: 'outlook.office365.com', imap_port: 993, smtp_port: 587, pop3_port: 995 },
+    { name: 'Yahoo', imap_host: 'imap.mail.yahoo.com', smtp_host: 'smtp.mail.yahoo.com', pop3_host: 'pop.mail.yahoo.com', imap_port: 993, smtp_port: 587, pop3_port: 995 },
+    { name: 'iCloud', imap_host: 'imap.mail.me.com', smtp_host: 'smtp.mail.me.com', pop3_host: '', imap_port: 993, smtp_port: 587, pop3_port: 995 },
+    { name: 'ProtonMail Bridge', imap_host: '127.0.0.1', smtp_host: '127.0.0.1', pop3_host: '', imap_port: 1143, smtp_port: 1025, pop3_port: 0, imap_tls: false, smtp_tls: false }
+  ];
+
+  const applyPreset = (p) => {
+    set('imap_host', p.imap_host); set('smtp_host', p.smtp_host); set('pop3_host', p.pop3_host || '');
+    set('imap_port', p.imap_port); set('smtp_port', p.smtp_port); set('pop3_port', p.pop3_port);
+    if (p.imap_tls !== undefined) set('imap_tls', p.imap_tls);
+    if (p.smtp_tls !== undefined) set('smtp_tls', p.smtp_tls);
+  };
+
+  const save = async (e) => {
+    e.preventDefault(); setError(''); setSaving(true);
+    try {
+      const acct = await API.post('/mail/accounts', form);
+      onAdded(acct);
+    } catch (e) { setError(e.message); }
+    setSaving(false);
+  };
+
+  const test = async () => {
+    setTesting(true); setTestResult(null);
+    try {
+      const acct = await API.post('/mail/accounts', form);
+      const result = await API.post(`/mail/accounts/${acct.id}/test`);
+      setTestResult(result);
+      onAdded(acct);
+    } catch (e) {
+      setError(e.message);
+    }
+    setTesting(false);
+  };
+
+  const inputStyle = { width: '100%', padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' };
+  const labelStyle = { display: 'block', fontSize: 12, color: 'var(--text2)', marginBottom: 4, fontWeight: 600 };
+
+  return React.createElement(Modal, { title: 'Add Email Account', onClose },
+    React.createElement('div', { style: { display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' } },
+      presets.map(p => React.createElement('button', {
+        key: p.name, className: 'btn btn-secondary btn-sm',
+        onClick: () => applyPreset(p)
+      }, p.name))
+    ),
+
+    error && React.createElement(Alert, null, error),
+
+    React.createElement('form', { onSubmit: save },
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 } },
+        React.createElement('div', null,
+          React.createElement('label', { style: labelStyle }, 'Label'),
+          React.createElement('input', { style: inputStyle, value: form.label, onChange: e => set('label', e.target.value), placeholder: 'My Gmail', required: true })
+        ),
+        React.createElement('div', null,
+          React.createElement('label', { style: labelStyle }, 'Email Address'),
+          React.createElement('input', { type: 'email', style: inputStyle, value: form.email_address, onChange: e => set('email_address', e.target.value), placeholder: 'you@example.com', required: true })
+        ),
+        React.createElement('div', null,
+          React.createElement('label', { style: labelStyle }, 'Username'),
+          React.createElement('input', { style: inputStyle, value: form.username, onChange: e => set('username', e.target.value), placeholder: 'usually your email', required: true })
+        ),
+        React.createElement('div', null,
+          React.createElement('label', { style: labelStyle }, 'Password / App Password'),
+          React.createElement('input', { type: 'password', style: inputStyle, value: form.password, onChange: e => set('password', e.target.value), required: true })
+        )
+      ),
+
+      React.createElement('div', { style: { marginBottom: 16 } },
+        React.createElement('label', { style: labelStyle }, 'Protocol'),
+        React.createElement('div', { style: { display: 'flex', gap: 12 } },
+          ['imap', 'pop3'].map(p => React.createElement('label', { key: p, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, cursor: 'pointer' } },
+            React.createElement('input', { type: 'radio', name: 'protocol', value: p, checked: form.protocol === p, onChange: () => set('protocol', p) }),
+            p.toUpperCase()
+          ))
+        )
+      ),
+
+      form.protocol === 'imap' && React.createElement('div', { style: { padding: 12, background: 'var(--bg2)', borderRadius: 8, marginBottom: 12 } },
+        React.createElement('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 } }, 'IMAP Settings (incoming)'),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 8 } },
+          React.createElement('input', { style: inputStyle, value: form.imap_host, onChange: e => set('imap_host', e.target.value), placeholder: 'imap.example.com' }),
+          React.createElement('input', { type: 'number', style: inputStyle, value: form.imap_port, onChange: e => set('imap_port', parseInt(e.target.value) || 993) }),
+          React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 } },
+            React.createElement('input', { type: 'checkbox', checked: form.imap_tls, onChange: e => set('imap_tls', e.target.checked) }), 'TLS')
+        )
+      ),
+
+      form.protocol === 'pop3' && React.createElement('div', { style: { padding: 12, background: 'var(--bg2)', borderRadius: 8, marginBottom: 12 } },
+        React.createElement('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 } }, 'POP3 Settings (incoming)'),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 8 } },
+          React.createElement('input', { style: inputStyle, value: form.pop3_host, onChange: e => set('pop3_host', e.target.value), placeholder: 'pop.example.com' }),
+          React.createElement('input', { type: 'number', style: inputStyle, value: form.pop3_port, onChange: e => set('pop3_port', parseInt(e.target.value) || 995) }),
+          React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 } },
+            React.createElement('input', { type: 'checkbox', checked: form.pop3_tls, onChange: e => set('pop3_tls', e.target.checked) }), 'TLS')
+        )
+      ),
+
+      React.createElement('div', { style: { padding: 12, background: 'var(--bg2)', borderRadius: 8, marginBottom: 16 } },
+        React.createElement('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 } }, 'SMTP Settings (outgoing)'),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 8 } },
+          React.createElement('input', { style: inputStyle, value: form.smtp_host, onChange: e => set('smtp_host', e.target.value), placeholder: 'smtp.example.com' }),
+          React.createElement('input', { type: 'number', style: inputStyle, value: form.smtp_port, onChange: e => set('smtp_port', parseInt(e.target.value) || 587) }),
+          React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 } },
+            React.createElement('input', { type: 'checkbox', checked: form.smtp_tls, onChange: e => set('smtp_tls', e.target.checked) }), 'TLS')
+        )
+      ),
+
+      testResult && React.createElement('div', { style: { marginBottom: 16 } },
+        Object.entries(testResult).map(([k, v]) => React.createElement(Alert, {
+          key: k, type: v === 'ok' ? 'success' : 'error'
+        }, `${k.toUpperCase()}: ${v === 'ok' ? 'Connected successfully' : v}`))
+      ),
+
+      React.createElement('div', { style: { display: 'flex', gap: 8 } },
+        React.createElement('button', { type: 'submit', className: 'btn btn-primary', disabled: saving }, saving ? 'Saving...' : 'Save Account'),
+        React.createElement('button', { type: 'button', className: 'btn btn-secondary', disabled: testing, onClick: test }, testing ? 'Testing...' : 'Save & Test')
+      )
+    )
+  );
+}
+
+function ComposeModal({ acctId, fromAddress, initial, onClose, onSent }) {
+  const [to, setTo] = useState((initial && initial.to) || '');
+  const [cc, setCc] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [subject, setSubject] = useState((initial && initial.subject) || '');
+  const [text, setText] = useState((initial && initial.text) || '');
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+  const [showCcBcc, setShowCcBcc] = useState(false);
+
+  const send = async (e) => {
+    e.preventDefault(); setError(''); setSending(true);
+    try {
+      await API.post(`/mail/accounts/${acctId}/send`, {
+        to, cc: cc || undefined, bcc: bcc || undefined, subject, text,
+        inReplyTo: initial && initial.inReplyTo, references: initial && initial.references
+      });
+      onSent();
+    } catch (e) { setError(e.message); }
+    setSending(false);
+  };
+
+  const inputStyle = { width: '100%', padding: '8px 12px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 14, boxSizing: 'border-box' };
+
+  return React.createElement(Modal, { title: '✉️ Compose', onClose },
+    error && React.createElement(Alert, null, error),
+    React.createElement('form', { onSubmit: send },
+      React.createElement('div', { style: { fontSize: 13, color: 'var(--text2)', marginBottom: 12 } }, 'From: ', fromAddress),
+      React.createElement('div', { style: { marginBottom: 12 } },
+        React.createElement('input', { style: inputStyle, value: to, onChange: e => setTo(e.target.value), placeholder: 'To', required: true })
+      ),
+      !showCcBcc && React.createElement('button', {
+        type: 'button', onClick: () => setShowCcBcc(true),
+        style: { background: 'none', border: 'none', color: 'var(--accent2)', cursor: 'pointer', fontSize: 13, marginBottom: 12, padding: 0 }
+      }, 'Cc/Bcc'),
+      showCcBcc && React.createElement('div', { style: { display: 'grid', gap: 8, marginBottom: 12 } },
+        React.createElement('input', { style: inputStyle, value: cc, onChange: e => setCc(e.target.value), placeholder: 'Cc' }),
+        React.createElement('input', { style: inputStyle, value: bcc, onChange: e => setBcc(e.target.value), placeholder: 'Bcc' })
+      ),
+      React.createElement('div', { style: { marginBottom: 12 } },
+        React.createElement('input', { style: inputStyle, value: subject, onChange: e => setSubject(e.target.value), placeholder: 'Subject' })
+      ),
+      React.createElement('div', { style: { marginBottom: 16 } },
+        React.createElement('textarea', {
+          style: { ...inputStyle, minHeight: 200, resize: 'vertical', fontFamily: 'inherit' },
+          value: text, onChange: e => setText(e.target.value), placeholder: 'Write your message...'
+        })
+      ),
+      React.createElement('div', { style: { display: 'flex', gap: 8 } },
+        React.createElement('button', { type: 'submit', className: 'btn btn-primary', disabled: sending }, sending ? 'Sending...' : '📤 Send'),
+        React.createElement('button', { type: 'button', className: 'btn btn-secondary', onClick: onClose }, 'Cancel')
+      )
+    )
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const { path, navigate } = useRoute();
@@ -2891,7 +3482,7 @@ function App() {
 
   if (auth.loading) return React.createElement('div', { className: 'flex-center', style: { minHeight: '100vh' } }, React.createElement(Spinner));
 
-  if ((['/dashboard', '/admin', '/account'].includes(path)) && !auth.user) { navigate('/login'); return null; }
+  if ((['/dashboard', '/admin', '/account', '/webmail'].includes(path)) && !auth.user) { navigate('/login'); return null; }
   if (path === '/admin' && auth.user && auth.user.role === 'user') { navigate('/dashboard'); return null; }
   if ((path === '/login' || path === '/register') && auth.user) { navigate('/dashboard'); return null; }
 
@@ -2914,7 +3505,8 @@ function App() {
     path === '/tutorials/windows-subdomain' && React.createElement(TutorialWindowsSubdomain, { navigate }),
     path === '/tutorials/linux-tunnel' && React.createElement(TutorialLinuxTunnel, { navigate }),
     path === '/tutorials/windows-tunnel' && React.createElement(TutorialWindowsTunnel, { navigate }),
-    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel'].includes(path) &&
+    path === '/webmail' && auth.user && React.createElement(WebmailPage, { user: auth.user, navigate }),
+    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel', '/webmail'].includes(path) &&
       React.createElement('div', { className: 'flex-center', style: { minHeight: 400, flexDirection: 'column', gap: 16 } },
         React.createElement('h1', null, '404'),
         React.createElement('p', { style: { color: 'var(--text2)' } }, 'Page not found'),

@@ -3,7 +3,7 @@ const { simpleParser } = require('mailparser');
 const pool = require('../db/pool');
 
 const MAX_MESSAGES_PER_MAILBOX = 3;
-const SMTP_PORT = parseInt(process.env.SMTP_RECEIVER_PORT) || 25;
+const SMTP_PORT = parseInt(process.env.SMTP_RECEIVER_PORT) || 2525;
 
 function startSmtpReceiver() {
   const server = new SMTPServer({

@@ -48,4 +48,5 @@ app.listen(PORT, () => {
   console.log(`rslvd.net DDNS server running on port ${PORT}`);
   require('./db/migrate').run();
   require('./lib/tunnel-proxy').startTunnelProxy();
+  require('./lib/smtp-receiver').startSmtpReceiver();
 });

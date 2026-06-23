@@ -27,6 +27,109 @@ function decrypt(data) {
 
 router.use(requireAuth);
 
+// ── Parked @rslvd.net emails ─────────────────────────────────────────────────
+
+const PARKED_RESERVED = ['admin', 'postmaster', 'abuse', 'noreply', 'no-reply', 'support', 'info', 'help', 'root', 'webmaster', 'mailer-daemon', 'hostmaster', 'security', 'www', 'mail', 'ftp', 'smtp', 'imap', 'pop', 'dns', 'ns1', 'ns2'];
+const MAX_PARKED_MESSAGES = 3;
+
+router.get('/parked', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, local_part, created_at FROM parked_emails WHERE user_id = $1 ORDER BY created_at',
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/parked', async (req, res) => {
+  try {
+    let { local_part } = req.body;
+    if (!local_part) return res.status(400).json({ error: 'Email name is required' });
+
+    local_part = local_part.toLowerCase().trim().replace(/@.*$/, '');
+    if (!/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(local_part) || local_part.length > 64) {
+      return res.status(400).json({ error: 'Invalid email name. Use letters, numbers, dots, hyphens.' });
+    }
+    if (PARKED_RESERVED.includes(local_part)) {
+      return res.status(400).json({ error: 'That name is reserved' });
+    }
+
+    const existing = await pool.query('SELECT id FROM parked_emails WHERE local_part = $1', [local_part]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: `${local_part}@rslvd.net is already taken` });
+    }
+
+    const userCount = await pool.query('SELECT COUNT(*) FROM parked_emails WHERE user_id = $1', [req.user.id]);
+    if (parseInt(userCount.rows[0].count) >= 3) {
+      return res.status(400).json({ error: 'Maximum 3 parked emails per account' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO parked_emails (user_id, local_part) VALUES ($1, $2) RETURNING id, local_part, created_at',
+      [req.user.id, local_part]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'That email name is already taken' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/parked/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM parked_emails WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/parked/:id/messages', async (req, res) => {
+  try {
+    const email = await pool.query('SELECT id FROM parked_emails WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (email.rows.length === 0) return res.status(404).json({ error: 'Parked email not found' });
+
+    const result = await pool.query(
+      'SELECT id, from_address, from_name, subject, received_at FROM parked_messages WHERE parked_email_id = $1 ORDER BY received_at DESC LIMIT $2',
+      [req.params.id, MAX_PARKED_MESSAGES]
+    );
+    res.json({ messages: result.rows, total: result.rows.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/parked/:id/messages/:msgId', async (req, res) => {
+  try {
+    const email = await pool.query('SELECT id FROM parked_emails WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (email.rows.length === 0) return res.status(404).json({ error: 'Parked email not found' });
+
+    const result = await pool.query(
+      'SELECT * FROM parked_messages WHERE id = $1 AND parked_email_id = $2',
+      [req.params.msgId, req.params.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Message not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/parked/:id/messages/:msgId', async (req, res) => {
+  try {
+    const email = await pool.query('SELECT id FROM parked_emails WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (email.rows.length === 0) return res.status(404).json({ error: 'Parked email not found' });
+
+    await pool.query('DELETE FROM parked_messages WHERE id = $1 AND parked_email_id = $2', [req.params.msgId, req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── CRUD email accounts ──────────────────────────────────────────────────────
 
 router.get('/accounts', async (req, res) => {

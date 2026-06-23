@@ -86,6 +86,27 @@ UPDATE users SET plan = 'free', max_hosts = 1, max_tunnels = 1 WHERE plan = 'non
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
 ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
 
+CREATE TABLE IF NOT EXISTS parked_emails (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  local_part VARCHAR(64) UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_parked_emails_user ON parked_emails(user_id);
+CREATE INDEX IF NOT EXISTS idx_parked_emails_local ON parked_emails(local_part);
+
+CREATE TABLE IF NOT EXISTS parked_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parked_email_id UUID REFERENCES parked_emails(id) ON DELETE CASCADE,
+  from_address VARCHAR(255),
+  from_name VARCHAR(255),
+  subject VARCHAR(1000),
+  text_body TEXT,
+  html_body TEXT,
+  received_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_parked_messages_email ON parked_messages(parked_email_id);
+
 CREATE TABLE IF NOT EXISTS reserved_subdomains (
   id SERIAL PRIMARY KEY,
   subdomain VARCHAR(63) UNIQUE NOT NULL,

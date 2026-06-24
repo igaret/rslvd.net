@@ -23,7 +23,7 @@ app.use('/api/update', require('./routes/update'));
 app.use('/api/tunnels', require('./routes/tunnels'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/support', require('./routes/support'));
-app.use('/api/mail', require('./routes/mail'));
+app.use('/api/parked-email', require('./routes/parked-email'));
 
 // Public IP detection for PWA DDNS auto-updater
 app.get('/api/ip', (req, res) => {
@@ -48,5 +48,5 @@ app.listen(PORT, () => {
   console.log(`rslvd.net DDNS server running on port ${PORT}`);
   require('./db/migrate').run();
   require('./lib/tunnel-proxy').startTunnelProxy();
-  require('./lib/smtp-receiver').startSmtpReceiver();
+  require('./lib/parked-smtp').start();
 });

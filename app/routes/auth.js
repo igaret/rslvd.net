@@ -10,12 +10,25 @@ const stripe = require('../lib/stripe');
 const activity = require('../lib/activity');
 const { sendMail } = require('../lib/mailer');
 
+const PARKED_RESERVED = ['admin', 'postmaster', 'abuse', 'noreply', 'no-reply', 'support', 'info', 'help', 'root', 'webmaster', 'mailer-daemon', 'hostmaster', 'security', 'www', 'mail', 'ftp', 'smtp', 'imap', 'pop', 'dns', 'ns1', 'ns2'];
+
 router.post('/register', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, parked_email } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     if (!validator.isEmail(email)) return res.status(400).json({ error: 'Invalid email' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    if (!parked_email) return res.status(400).json({ error: 'Choose a name for your @rslvd.net email' });
+    const localPart = parked_email.toLowerCase().trim().replace(/@.*$/, '');
+    if (!/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(localPart) || localPart.length > 64) {
+      return res.status(400).json({ error: 'Invalid email name. Use letters, numbers, dots, hyphens.' });
+    }
+    if (PARKED_RESERVED.includes(localPart)) {
+      return res.status(400).json({ error: 'That email name is reserved' });
+    }
+    const taken = await pool.query('SELECT id FROM parked_emails WHERE local_part = $1', [localPart]);
+    if (taken.rows.length > 0) return res.status(409).json({ error: `${localPart}@rslvd.net is already taken` });
 
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (existing.rows[0]) return res.status(409).json({ error: 'Email already registered' });
@@ -31,19 +44,40 @@ router.post('/register', async (req, res) => {
       console.error('Stripe customer creation failed:', e.message);
     }
 
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
-       VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
-      [email.toLowerCase(), hash, stripeCustomerId]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const user = result.rows[0];
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+      const result = await client.query(
+        `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
+         VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
+        [email.toLowerCase(), hash, stripeCustomerId]
+      );
 
-    activity.log('user.register', { userId: user.id, detail: user.email, req });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, plan: user.plan, maxHosts: user.max_hosts, maxTunnels: user.max_tunnels, status: user.subscription_status, role: 'user' } });
+      const user = result.rows[0];
+
+      await client.query(
+        'INSERT INTO parked_emails (user_id, local_part) VALUES ($1, $2)',
+        [user.id, localPart]
+      );
+
+      await client.query('COMMIT');
+
+      const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
+      activity.log('user.register', { userId: user.id, detail: `${user.email} (${localPart}@rslvd.net)`, req });
+      res.status(201).json({ token, user: { id: user.id, email: user.email, plan: user.plan, maxHosts: user.max_hosts, maxTunnels: user.max_tunnels, status: user.subscription_status, role: 'user', parkedEmail: `${localPart}@rslvd.net` } });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
+    if (err.code === '23505' && err.constraint === 'parked_emails_local_part_key') {
+      return res.status(409).json({ error: 'That email name was just taken. Try another.' });
+    }
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -71,6 +105,9 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
     activity.log('user.login', { userId: user.id, detail: user.email, req });
 
+    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [user.id]);
+    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
+
     res.json({
       token,
       user: {
@@ -85,6 +122,7 @@ router.post('/login', async (req, res) => {
         isSiteOwner: user.is_site_owner,
         totpEnabled: user.totp_enabled,
         role: user.is_site_owner ? 'site_owner' : user.is_admin ? 'admin' : 'user',
+        parkedEmail,
       }
     });
   } catch (err) {
@@ -95,6 +133,8 @@ router.post('/login', async (req, res) => {
 
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
   const u = req.user;
+  const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
+  const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
   res.json({
     id: u.id,
     email: u.email,
@@ -108,6 +148,7 @@ router.get('/me', require('../middleware/auth').requireAuth, async (req, res) =>
     isSiteOwner: u.is_site_owner,
     totpEnabled: u.totp_enabled || false,
     role: u.is_site_owner ? 'site_owner' : u.is_admin ? 'admin' : 'user',
+    parkedEmail,
   });
 });
 

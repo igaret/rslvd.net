@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
 const nodemailer = require('nodemailer');
+const dns = require('dns').promises;
 const { requireAuth } = require('../middleware/auth');
 
 const MAX_MESSAGES = 3;
@@ -167,25 +168,56 @@ router.delete('/trash', async (req, res) => {
   }
 });
 
+async function resolveMx(domain) {
+  try {
+    const records = await dns.resolveMx(domain);
+    records.sort((a, b) => a.priority - b.priority);
+    return records.map(r => r.exchange);
+  } catch {
+    return [domain];
+  }
+}
+
 router.post('/send', async (req, res) => {
   try {
     const pe = await getUserEmail(req.user.id);
     if (!pe) return res.status(404).json({ error: 'No parked email' });
     const { to, subject, body } = req.body;
     if (!to) return res.status(400).json({ error: 'Recipient is required' });
+
+    const recipientDomain = to.split('@')[1];
+    if (!recipientDomain) return res.status(400).json({ error: 'Invalid recipient address' });
+
+    const mxHosts = await resolveMx(recipientDomain);
     const fromAddr = `${pe.local_part}@rslvd.net`;
-    const transport = nodemailer.createTransport({
-      host: '127.0.0.1',
-      port: 25,
-      secure: false,
-      tls: { rejectUnauthorized: false },
-    });
-    await transport.sendMail({
-      from: `"${pe.local_part}" <${fromAddr}>`,
-      to,
-      subject: subject || '(no subject)',
-      text: body || '',
-    });
+
+    let lastErr;
+    for (const mx of mxHosts) {
+      try {
+        const transport = nodemailer.createTransport({
+          host: mx,
+          port: 25,
+          secure: false,
+          tls: { rejectUnauthorized: false },
+          name: 'rslvd.net',
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 30000,
+        });
+        await transport.sendMail({
+          from: `"${pe.local_part}" <${fromAddr}>`,
+          to,
+          subject: subject || '(no subject)',
+          text: body || '',
+        });
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (lastErr) throw lastErr;
+
     const cnt = await pool.query(
       'SELECT COUNT(*) FROM parked_messages WHERE parked_email_id = $1 AND is_trashed = FALSE',
       [pe.id]

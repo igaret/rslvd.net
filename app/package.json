@@ -15,7 +15,6 @@
     "express": "^5.0.0",
     "express-rate-limit": "^8.0.0",
     "helmet": "^7.1.0",
-    "imapflow": "^1.4.2",
     "jsonwebtoken": "^9.0.2",
     "mailparser": "^3.9.11",
     "nodemailer": "^6.9.14",

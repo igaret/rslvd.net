@@ -44,23 +44,35 @@ router.post('/register', async (req, res) => {
       console.error('Stripe customer creation failed:', e.message);
     }
 
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
-       VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
-      [email.toLowerCase(), hash, stripeCustomerId]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    const user = result.rows[0];
+      const result = await client.query(
+        `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
+         VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
+        [email.toLowerCase(), hash, stripeCustomerId]
+      );
 
-    await pool.query(
-      'INSERT INTO parked_emails (user_id, local_part) VALUES ($1, $2)',
-      [user.id, localPart]
-    );
+      const user = result.rows[0];
 
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+      await client.query(
+        'INSERT INTO parked_emails (user_id, local_part) VALUES ($1, $2)',
+        [user.id, localPart]
+      );
 
-    activity.log('user.register', { userId: user.id, detail: `${user.email} (${localPart}@rslvd.net)`, req });
-    res.status(201).json({ token, user: { id: user.id, email: user.email, plan: user.plan, maxHosts: user.max_hosts, maxTunnels: user.max_tunnels, status: user.subscription_status, role: 'user', parkedEmail: `${localPart}@rslvd.net` } });
+      await client.query('COMMIT');
+
+      const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
+      activity.log('user.register', { userId: user.id, detail: `${user.email} (${localPart}@rslvd.net)`, req });
+      res.status(201).json({ token, user: { id: user.id, email: user.email, plan: user.plan, maxHosts: user.max_hosts, maxTunnels: user.max_tunnels, status: user.subscription_status, role: 'user', parkedEmail: `${localPart}@rslvd.net` } });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
     if (err.code === '23505' && err.constraint === 'parked_emails_local_part_key') {

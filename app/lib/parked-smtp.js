@@ -33,6 +33,9 @@ function start() {
           const raw = Buffer.concat(chunks);
           const parsed = await simpleParser(raw);
 
+          let stored = 0;
+          let full = 0;
+
           for (const rcpt of session.envelope.rcptTo) {
             const addr = rcpt.address.toLowerCase();
             if (!addr.endsWith('@rslvd.net')) continue;
@@ -48,6 +51,7 @@ function start() {
             );
             if (parseInt(cnt.rows[0].count) >= MAX_MESSAGES) {
               console.log(`Mailbox ${localPart}@rslvd.net full (${MAX_MESSAGES}), rejecting`);
+              full++;
               continue;
             }
 
@@ -60,7 +64,12 @@ function start() {
               [parkedEmailId, fromAddr, fromName, addr, parsed.subject || '(no subject)',
                parsed.text || '', parsed.html || '']
             );
+            stored++;
             console.log(`Stored message for ${localPart}@rslvd.net from ${fromAddr}`);
+          }
+
+          if (stored === 0 && full > 0) {
+            return callback(new Error('Mailbox full — max ' + MAX_MESSAGES + ' messages'));
           }
           callback();
         } catch (err) {

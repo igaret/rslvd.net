@@ -23,6 +23,7 @@ app.use('/api/update', require('./routes/update'));
 app.use('/api/tunnels', require('./routes/tunnels'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/support', require('./routes/support'));
+app.use('/api/mail', require('./routes/mail'));
 
 // Public IP detection for PWA DDNS auto-updater
 app.get('/api/ip', (req, res) => {

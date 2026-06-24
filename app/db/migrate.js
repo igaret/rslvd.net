@@ -193,6 +193,27 @@ INSERT INTO reserved_subdomains (subdomain, reason) VALUES
   ('autoconfig','Email autoconfig'),
   ('autodiscover','Email autodiscover')
 ON CONFLICT (subdomain) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS email_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  label VARCHAR(100) NOT NULL,
+  email_address VARCHAR(255) NOT NULL,
+  imap_host VARCHAR(255),
+  imap_port INTEGER DEFAULT 993,
+  imap_tls BOOLEAN DEFAULT TRUE,
+  smtp_host VARCHAR(255),
+  smtp_port INTEGER DEFAULT 587,
+  smtp_tls BOOLEAN DEFAULT TRUE,
+  pop3_host VARCHAR(255),
+  pop3_port INTEGER DEFAULT 995,
+  pop3_tls BOOLEAN DEFAULT TRUE,
+  username VARCHAR(255) NOT NULL,
+  password_enc TEXT NOT NULL,
+  protocol VARCHAR(10) DEFAULT 'imap',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_email_accounts_user ON email_accounts(user_id);
 `;
 
 async function run() {

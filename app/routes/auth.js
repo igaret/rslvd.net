@@ -132,24 +132,29 @@ router.post('/login', async (req, res) => {
 });
 
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
-  const u = req.user;
-  const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
-  const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
-  res.json({
-    id: u.id,
-    email: u.email,
-    displayName: u.display_name,
-    plan: u.plan,
-    maxHosts: u.max_hosts,
-    maxTunnels: u.max_tunnels,
-    status: u.subscription_status,
-    planExpiresAt: u.plan_expires_at,
-    isAdmin: u.is_admin,
-    isSiteOwner: u.is_site_owner,
-    totpEnabled: u.totp_enabled || false,
-    role: u.is_site_owner ? 'site_owner' : u.is_admin ? 'admin' : 'user',
-    parkedEmail,
-  });
+  try {
+    const u = req.user;
+    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
+    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
+    res.json({
+      id: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      plan: u.plan,
+      maxHosts: u.max_hosts,
+      maxTunnels: u.max_tunnels,
+      status: u.subscription_status,
+      planExpiresAt: u.plan_expires_at,
+      isAdmin: u.is_admin,
+      isSiteOwner: u.is_site_owner,
+      totpEnabled: u.totp_enabled || false,
+      role: u.is_site_owner ? 'site_owner' : u.is_admin ? 'admin' : 'user',
+      parkedEmail,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch user info' });
+  }
 });
 
 // ── Update profile (display name) ──────────────────────────────────────────────

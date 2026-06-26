@@ -6,7 +6,6 @@ const crypto = require('crypto');
 const validator = require('validator');
 const speakeasy = require('speakeasy');
 const pool = require('../db/pool');
-const stripe = require('../lib/stripe');
 const activity = require('../lib/activity');
 const { sendMail } = require('../lib/mailer');
 
@@ -35,23 +34,14 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
 
-    // Create Stripe customer
-    let stripeCustomerId = null;
-    try {
-      const customer = await stripe.customers.create({ email: email.toLowerCase() });
-      stripeCustomerId = customer.id;
-    } catch (e) {
-      console.error('Stripe customer creation failed:', e.message);
-    }
-
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
       const result = await client.query(
-        `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status)
-         VALUES ($1, $2, $3, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
-        [email.toLowerCase(), hash, stripeCustomerId]
+        `INSERT INTO users (email, password_hash, plan, max_hosts, max_tunnels, subscription_status)
+         VALUES ($1, $2, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
+        [email.toLowerCase(), hash]
       );
 
       const user = result.rows[0];

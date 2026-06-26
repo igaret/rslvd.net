@@ -22,7 +22,7 @@
     "redis": "^4.6.15",
     "smtp-server": "^3.19.1",
     "speakeasy": "^2.0.0",
-    "stripe": "^16.2.0",
+    "braintree": "^3.24.0",
     "uuid": "^10.0.0",
     "validator": "^13.12.0"
   }

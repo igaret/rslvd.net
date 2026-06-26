@@ -1158,9 +1158,15 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const [tab, setTab] = useState('hosts');
   const [showAddHost, setShowAddHost] = useState(false);
   const [showAddTunnel, setShowAddTunnel] = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState('');
-  const [portalLoading, setPortalLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [subscription, setSubscription] = useState(null);
+  const [subLoading, setSubLoading] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [showUpdatePM, setShowUpdatePM] = useState(false);
+  const btDropinRef = useRef(null);
+  const btContainerRef = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1185,15 +1191,90 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const onTunnelDeleted = id => setTunnels(x => x.filter(t => t.id !== id));
   const onTunnelHttpsToggle = (id, val) => setTunnels(x => x.map(t => t.id === id ? { ...t, force_https: val } : t));
 
-  const handleCheckout = async (planKey) => {
-    setCheckoutLoading(planKey);
-    try { const d = await API.post('/billing/checkout', { plan: planKey }); window.location.href = d.url; }
-    catch (err) { alert(err.message); setCheckoutLoading(''); }
+  const loadSubscription = async () => {
+    setSubLoading(true);
+    try { const s = await API.get('/billing/subscription'); setSubscription(s); }
+    catch (e) { setSubscription(null); }
+    finally { setSubLoading(false); }
   };
-  const handlePortal = async () => {
-    setPortalLoading(true);
-    try { const d = await API.post('/billing/portal'); window.location.href = d.url; }
-    catch (err) { alert(err.message); setPortalLoading(false); }
+
+  useEffect(() => {
+    if (tab === 'billing' && user.subscription_status === 'active') loadSubscription();
+  }, [tab]);
+
+  const initDropin = async (containerId) => {
+    try {
+      if (btDropinRef.current) { btDropinRef.current.teardown(() => {}); btDropinRef.current = null; }
+      const { clientToken } = await API.post('/billing/client-token');
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      container.innerHTML = '';
+      btDropinRef.current = await new Promise((resolve, reject) => {
+        braintree.dropin.create({ authorization: clientToken, container: '#' + containerId }, (err, inst) => {
+          if (err) reject(err); else resolve(inst);
+        });
+      });
+    } catch (e) { console.error('Drop-in init failed:', e); }
+  };
+
+  const teardownDropin = () => {
+    if (btDropinRef.current) { btDropinRef.current.teardown(() => {}); btDropinRef.current = null; }
+  };
+
+  useEffect(() => {
+    if (selectedPlan) initDropin('bt-dropin-subscribe');
+    else teardownDropin();
+    return () => teardownDropin();
+  }, [selectedPlan]);
+
+  useEffect(() => {
+    if (showUpdatePM) initDropin('bt-dropin-update');
+    else teardownDropin();
+    return () => teardownDropin();
+  }, [showUpdatePM]);
+
+  const handleSubscribe = async () => {
+    if (!btDropinRef.current) return;
+    setPaymentLoading(true);
+    try {
+      const payload = await new Promise((resolve, reject) => {
+        btDropinRef.current.requestPaymentMethod((err, p) => { if (err) reject(err); else resolve(p); });
+      });
+      await API.post('/billing/subscribe', { plan: selectedPlan, nonce: payload.nonce });
+      setMsg('Subscription activated!');
+      setSelectedPlan(null);
+      teardownDropin();
+      setTimeout(() => refreshUser(), 1500);
+    } catch (e) { alert(e.message || 'Payment failed'); }
+    finally { setPaymentLoading(false); }
+  };
+
+  const handleCancel = async () => {
+    if (!confirm('Cancel your subscription? You will be downgraded to the Free plan.')) return;
+    setCancelLoading(true);
+    try {
+      await API.post('/billing/cancel');
+      setMsg('Subscription cancelled.');
+      setSubscription(null);
+      setTimeout(() => refreshUser(), 1500);
+    } catch (e) { alert(e.message); }
+    finally { setCancelLoading(false); }
+  };
+
+  const handleUpdatePayment = async () => {
+    if (!btDropinRef.current) return;
+    setPaymentLoading(true);
+    try {
+      const payload = await new Promise((resolve, reject) => {
+        btDropinRef.current.requestPaymentMethod((err, p) => { if (err) reject(err); else resolve(p); });
+      });
+      await API.post('/billing/update-payment', { nonce: payload.nonce });
+      setMsg('Payment method updated!');
+      setShowUpdatePM(false);
+      teardownDropin();
+      loadSubscription();
+    } catch (e) { alert(e.message); }
+    finally { setPaymentLoading(false); }
   };
 
   const planLabel = { free: 'Free', monthly: 'Monthly', quarterly: 'Quarterly', semi_annual: '6 Months', annual: 'Annual', none: 'No plan' };
@@ -1327,13 +1408,25 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
               React.createElement('div', null,
                 React.createElement('h3', { style: { marginBottom: 4 } }, `${planLabel[user.plan]} plan`),
                 React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, `${user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts} hostnames · ${user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels} tunnels`),
-                user.planExpiresAt && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Renews ${new Date(user.planExpiresAt).toLocaleDateString()}`)
+                subscription && subscription.paidThroughDate && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Paid through ${new Date(subscription.paidThroughDate).toLocaleDateString()}`),
+                subscription && subscription.paymentMethod && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `${subscription.paymentMethod.type} ending in ${subscription.paymentMethod.last4} · Exp ${subscription.paymentMethod.expirationMonth}/${subscription.paymentMethod.expirationYear}`)
               ),
-              React.createElement('button', { className: 'btn btn-secondary', onClick: handlePortal, disabled: portalLoading },
-                portalLoading ? React.createElement(Spinner) : 'Manage billing'
+              React.createElement('div', { style: { display: 'flex', gap: 8, flexDirection: 'column' } },
+                React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => setShowUpdatePM(!showUpdatePM) }, showUpdatePM ? 'Cancel' : 'Update payment'),
+                React.createElement('button', { className: 'btn btn-sm', style: { background: 'var(--bg3)', color: 'var(--text2)', border: '1px solid var(--border)' }, onClick: handleCancel, disabled: cancelLoading },
+                  cancelLoading ? React.createElement(Spinner) : 'Cancel subscription'
+                )
               )
             )
-          )
+          ),
+          showUpdatePM && React.createElement('div', { className: 'card mb-4' },
+            React.createElement('h3', { style: { marginBottom: 12 } }, 'Update Payment Method'),
+            React.createElement('div', { id: 'bt-dropin-update' }),
+            React.createElement('button', { className: 'btn btn-primary', style: { marginTop: 12 }, onClick: handleUpdatePayment, disabled: paymentLoading },
+              paymentLoading ? React.createElement(Spinner) : 'Update'
+            )
+          ),
+          subLoading && React.createElement('div', { className: 'flex-center', style: { padding: 24 } }, React.createElement(Spinner))
         )
         : React.createElement('div', null,
           React.createElement('div', { className: 'card mb-4', style: { borderColor: 'var(--border2)' } },
@@ -1341,13 +1434,13 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
               React.createElement('div', { style: { fontSize: 24 } }, '🎁'),
               React.createElement('div', null,
                 React.createElement('h3', { style: { marginBottom: 4 } }, 'Current: Free Plan'),
-                React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, '1 hostname · 1 tunnel · always free')
+                React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, '2 hostnames · 2 tunnels · always free')
               )
             )
           ),
           React.createElement('h2', { className: 'section-title' }, 'Upgrade for more'),
           React.createElement('div', { className: 'pricing-grid' },
-            plans.map(p => React.createElement('div', { key: p.key, className: 'pricing-card' },
+            plans.map(p => React.createElement('div', { key: p.key, className: `pricing-card${selectedPlan === p.key ? ' selected' : ''}`, style: selectedPlan === p.key ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 2px var(--accent)' } : {} },
               React.createElement('h3', { style: { color: 'var(--text2)', fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 } }, p.label),
               React.createElement('div', { className: 'price-amount' }, p.amount.split('/')[0]),
               React.createElement('div', { className: 'price-period' }, '/' + p.amount.split('/')[1]),
@@ -1355,12 +1448,21 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
                 React.createElement('li', null, `${p.maxHosts >= 999999 ? 'Unlimited' : p.maxHosts} hostnames`),
                 React.createElement('li', null, `${p.maxTunnels >= 999999 ? 'Unlimited' : p.maxTunnels} tunnels`),
                 React.createElement('li', null, 'IPv4 + IPv6'),
-                p.key === 'annual' && React.createElement('li', { style: { color: 'var(--accent2)', fontWeight: 600 } }, '🔗 Nested subdomains & tunnels'),
+                p.key === 'annual' && React.createElement('li', { style: { color: 'var(--accent2)', fontWeight: 600 } }, 'Nested subdomains & tunnels'),
               ),
-              React.createElement('button', { className: 'btn btn-primary w-full', onClick: () => handleCheckout(p.key), disabled: !!checkoutLoading },
-                checkoutLoading === p.key ? React.createElement(Spinner) : 'Subscribe'
-              )
+              React.createElement('button', {
+                className: selectedPlan === p.key ? 'btn btn-secondary w-full' : 'btn btn-primary w-full',
+                onClick: () => setSelectedPlan(selectedPlan === p.key ? null : p.key),
+              }, selectedPlan === p.key ? 'Cancel' : 'Select')
             ))
+          ),
+          selectedPlan && React.createElement('div', { className: 'card', style: { marginTop: 16 } },
+            React.createElement('h3', { style: { marginBottom: 4 } }, `Subscribe to ${planLabel[selectedPlan]}`),
+            React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 16 } }, `${plans.find(p => p.key === selectedPlan)?.amount || ''} · Cancel anytime`),
+            React.createElement('div', { id: 'bt-dropin-subscribe' }),
+            React.createElement('button', { className: 'btn btn-primary w-full', style: { marginTop: 12 }, onClick: handleSubscribe, disabled: paymentLoading },
+              paymentLoading ? React.createElement(Spinner) : 'Pay & Subscribe'
+            )
           )
         )
     ),
@@ -2261,7 +2363,7 @@ function TermsPage({ navigate }) {
     ),
 
     React.createElement(Section, { title: '6. Billing and Refunds' },
-      React.createElement(P, null, 'Paid plans are billed in advance through Stripe. All charges are non-refundable except where required by applicable law. Downgrading or cancelling a plan takes effect at the end of the current billing period. We reserve the right to change pricing with 30 days notice.')
+      React.createElement(P, null, 'Paid plans are billed in advance through Braintree (a PayPal service). All charges are non-refundable except where required by applicable law. Downgrading or cancelling a plan takes effect at the end of the current billing period. We reserve the right to change pricing with 30 days notice.')
     ),
 
     React.createElement(Section, { title: '7. Intellectual Property' },
@@ -2300,7 +2402,7 @@ function PrivacyPage({ navigate }) {
       React.createElement(Li, { items: [
         'Account information: email address and hashed password when you register.',
         'Usage data: IP addresses, DNS update requests, tunnel connection timestamps, and error logs.',
-        'Billing data: payment details are handled by Stripe and never stored on our servers.',
+        'Billing data: payment details are handled by Braintree (a PayPal service) and never stored on our servers.',
         'Device/platform data: the binary platform you use to connect (e.g. linux-amd64) for diagnostic purposes.',
       ]})
     ),
@@ -2328,7 +2430,7 @@ function PrivacyPage({ navigate }) {
     React.createElement(Section, { title: '5. Data Sharing' },
       React.createElement(P, null, 'We do not sell, rent, or trade your personal information. We may share data with:'),
       React.createElement(Li, { items: [
-        'Stripe — for payment processing.',
+        'Braintree (PayPal) — for payment processing.',
         'IONOS — for DNS record management.',
         'Law enforcement or government authorities — if required by law or to protect the safety of users.',
       ]})

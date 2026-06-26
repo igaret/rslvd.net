@@ -232,6 +232,8 @@ DO $$ BEGIN
     ALTER TABLE parked_emails ADD CONSTRAINT parked_emails_user_id_key UNIQUE (user_id);
   END IF;
 END $$;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS braintree_customer_id VARCHAR(255);
 `;
 
 async function run() {

@@ -1250,12 +1250,12 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   };
 
   const handleCancel = async () => {
-    if (!confirm('Cancel your subscription? You will be downgraded to the Free plan.')) return;
+    if (!confirm('Cancel your subscription? Your plan will remain active until the end of your current billing period.')) return;
     setCancelLoading(true);
     try {
       await API.post('/billing/cancel');
-      setMsg('Subscription cancelled.');
-      setSubscription(null);
+      setMsg('Subscription cancelled. Your plan remains active until your billing period ends.');
+      loadSubscription();
       setTimeout(() => refreshUser(), 1500);
     } catch (e) { alert(e.message); }
     finally { setCancelLoading(false); }
@@ -1278,11 +1278,11 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   };
 
   const planLabel = { free: 'Free', monthly: 'Monthly', quarterly: 'Quarterly', semi_annual: '6 Months', annual: 'Annual', none: 'No plan' };
-  const statusColor = { active: 'green', free: 'purple', past_due: 'yellow', inactive: 'gray' };
+  const statusColor = { active: 'green', cancelling: 'yellow', free: 'purple', past_due: 'yellow', inactive: 'gray' };
 
   if (loading) return React.createElement('div', { className: 'flex-center', style: { minHeight: 400 } }, React.createElement(Spinner));
 
-  const isPaidActive = user.status === 'active';
+  const isPaidActive = user.status === 'active' || user.status === 'cancelling';
   const isFree = user.plan === 'free' || user.status === 'free';
   const canAddHost = hosts.length < (user.maxHosts || 2);
   const canAddTunnel = tunnels.length < (user.maxTunnels || 2);
@@ -1408,12 +1408,14 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
               React.createElement('div', null,
                 React.createElement('h3', { style: { marginBottom: 4 } }, `${planLabel[user.plan]} plan`),
                 React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, `${user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts} hostnames · ${user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels} tunnels`),
-                subscription && subscription.paidThroughDate && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Paid through ${new Date(subscription.paidThroughDate).toLocaleDateString()}`),
+                user.status === 'cancelling'
+                  ? React.createElement('p', { style: { color: 'var(--warning)', fontSize: 13, marginTop: 4, fontWeight: 600 } }, `Cancelling — active until ${subscription && subscription.paidThroughDate ? new Date(subscription.paidThroughDate).toLocaleDateString() : (user.planExpiresAt ? new Date(user.planExpiresAt).toLocaleDateString() : 'end of billing period')}`)
+                  : subscription && subscription.paidThroughDate && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Paid through ${new Date(subscription.paidThroughDate).toLocaleDateString()}`),
                 subscription && subscription.paymentMethod && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `${subscription.paymentMethod.type} ending in ${subscription.paymentMethod.last4} · Exp ${subscription.paymentMethod.expirationMonth}/${subscription.paymentMethod.expirationYear}`)
               ),
               React.createElement('div', { style: { display: 'flex', gap: 8, flexDirection: 'column' } },
-                React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => setShowUpdatePM(!showUpdatePM) }, showUpdatePM ? 'Cancel' : 'Update payment'),
-                React.createElement('button', { className: 'btn btn-sm', style: { background: 'var(--bg3)', color: 'var(--text2)', border: '1px solid var(--border)' }, onClick: handleCancel, disabled: cancelLoading },
+                user.status !== 'cancelling' && React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => setShowUpdatePM(!showUpdatePM) }, showUpdatePM ? 'Cancel' : 'Update payment'),
+                user.status !== 'cancelling' && React.createElement('button', { className: 'btn btn-sm', style: { background: 'var(--bg3)', color: 'var(--text2)', border: '1px solid var(--border)' }, onClick: handleCancel, disabled: cancelLoading },
                   cancelLoading ? React.createElement(Spinner) : 'Cancel subscription'
                 )
               )

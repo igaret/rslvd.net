@@ -39,10 +39,6 @@ router.post('/subscribe', requireAuth, async (req, res) => {
 
     const user = req.user;
 
-    if (user.subscription_id) {
-      try { await gateway.subscription.cancel(user.subscription_id); } catch (_) {}
-    }
-
     let customerId = user.braintree_customer_id;
     let paymentMethodToken;
 
@@ -78,6 +74,10 @@ router.post('/subscribe', requireAuth, async (req, res) => {
       return res.status(400).json({ error: subResult.message || 'Subscription failed' });
     }
 
+    if (user.subscription_id) {
+      try { await gateway.subscription.cancel(user.subscription_id); } catch (_) {}
+    }
+
     const sub = subResult.subscription;
     await pool.query(
       `UPDATE users SET subscription_id = $1, subscription_status = 'active',
@@ -108,8 +108,11 @@ router.get('/subscription', requireAuth, async (req, res) => {
         } catch (_) {}
       }
 
+      const effectiveStatus = user.subscription_status === 'cancelling' ? 'cancelling'
+        : sub.status === 'Active' ? 'active' : sub.status.toLowerCase().replace(/ /g, '_');
+
       res.json({
-        status: sub.status === 'Active' ? 'active' : sub.status.toLowerCase().replace(/ /g, '_'),
+        status: effectiveStatus,
         plan: user.plan,
         paidThroughDate: sub.paidThroughDate,
         nextBillingDate: sub.nextBillingDate,
@@ -138,13 +141,12 @@ router.post('/cancel', requireAuth, async (req, res) => {
     }
 
     await pool.query(
-      `UPDATE users SET subscription_status = 'inactive', plan = 'free',
-       max_hosts = 2, max_tunnels = 2, subscription_id = NULL, updated_at = NOW()
+      `UPDATE users SET subscription_status = 'cancelling', updated_at = NOW()
        WHERE id = $1`,
       [user.id]
     );
 
-    res.json({ success: true, message: 'Subscription cancelled' });
+    res.json({ success: true, message: 'Subscription will remain active until the end of your billing period' });
   } catch (err) {
     console.error('Cancel error:', err);
     res.status(500).json({ error: 'Cancellation failed' });

@@ -45,7 +45,16 @@ router.post('/', async (req, res) => {
         break;
       }
 
-      case 'subscription_canceled':
+      case 'subscription_canceled': {
+        if (!sub) break;
+        await pool.query(
+          `UPDATE users SET subscription_status = 'cancelling', updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [sub.id]
+        );
+        break;
+      }
+
       case 'subscription_expired': {
         if (!sub) break;
         await pool.query(

@@ -1199,7 +1199,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   };
 
   useEffect(() => {
-    if (tab === 'billing' && user.subscription_status === 'active') loadSubscription();
+    if (tab === 'billing' && (user.status === 'active' || user.status === 'cancelling')) loadSubscription();
   }, [tab]);
 
   const initDropin = async (containerId) => {

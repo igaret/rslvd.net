@@ -39,6 +39,10 @@ router.post('/subscribe', requireAuth, async (req, res) => {
 
     const user = req.user;
 
+    if (user.subscription_status === 'active' && user.subscription_id) {
+      return res.status(400).json({ error: 'You already have an active subscription. Cancel it first or contact support.' });
+    }
+
     let customerId = user.braintree_customer_id;
     let paymentMethodToken;
 
@@ -75,7 +79,11 @@ router.post('/subscribe', requireAuth, async (req, res) => {
     }
 
     if (user.subscription_id) {
-      try { await gateway.subscription.cancel(user.subscription_id); } catch (_) {}
+      try {
+        await gateway.subscription.cancel(user.subscription_id);
+      } catch (e) {
+        console.error('Failed to cancel old subscription:', user.subscription_id, e.message);
+      }
     }
 
     const sub = subResult.subscription;

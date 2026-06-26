@@ -38,10 +38,10 @@ router.post('/register', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status,
-       email_verification_token, email_verification_expires)
-       VALUES ($1, $2, $3, 'free', 2, 2, 'free', $4, $5)
-       RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels, email_verified`,
-      [email.toLowerCase(), hash, stripeCustomerId, verifyToken, verifyExpires]
+       email_verification_token, email_verification_expires, tos_version_accepted)
+       VALUES ($1, $2, $3, 'free', 2, 2, 'free', $4, $5, $6)
+       RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels, email_verified, tos_version_accepted`,
+      [email.toLowerCase(), hash, stripeCustomerId, verifyToken, verifyExpires, CURRENT_LEGAL_VERSION]
     );
 
     const user = result.rows[0];
@@ -73,7 +73,7 @@ router.post('/register', async (req, res) => {
         status: user.subscription_status,
         role: 'user',
         emailVerified: user.email_verified || false,
-        tosAccepted: false,
+        tosAccepted: user.tos_version_accepted === CURRENT_LEGAL_VERSION,
         currentLegalVersion: CURRENT_LEGAL_VERSION,
       }
     });

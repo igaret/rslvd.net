@@ -16,7 +16,12 @@ router.get('/plans', (req, res) => {
   })));
 });
 
-router.post('/client-token', requireAuth, async (req, res) => {
+function requireGateway(req, res, next) {
+  if (!gateway) return res.status(503).json({ error: 'Billing is not configured' });
+  next();
+}
+
+router.post('/client-token', requireAuth, requireGateway, async (req, res) => {
   try {
     const opts = {};
     if (req.user.braintree_customer_id) {
@@ -30,7 +35,7 @@ router.post('/client-token', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/subscribe', requireAuth, async (req, res) => {
+router.post('/subscribe', requireAuth, requireGateway, async (req, res) => {
   try {
     const { plan, nonce } = req.body;
     const planInfo = PLANS[plan];
@@ -101,7 +106,7 @@ router.post('/subscribe', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/subscription', requireAuth, async (req, res) => {
+router.get('/subscription', requireAuth, requireGateway, async (req, res) => {
   try {
     const user = req.user;
     if (!user.subscription_id) return res.json({ status: 'none' });
@@ -135,7 +140,7 @@ router.get('/subscription', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/cancel', requireAuth, async (req, res) => {
+router.post('/cancel', requireAuth, requireGateway, async (req, res) => {
   try {
     const user = req.user;
     if (!user.subscription_id) return res.status(400).json({ error: 'No active subscription' });
@@ -161,7 +166,7 @@ router.post('/cancel', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/update-payment', requireAuth, async (req, res) => {
+router.post('/update-payment', requireAuth, requireGateway, async (req, res) => {
   try {
     const { nonce } = req.body;
     if (!nonce) return res.status(400).json({ error: 'Payment method required' });

@@ -17,6 +17,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Missing webhook data' });
     }
 
+    if (!gateway) return res.status(503).json({ error: 'Billing is not configured' });
+
     const notification = await gateway.webhookNotification.parse(btSignature, btPayload);
     const sub = notification.subscription;
 

@@ -16,7 +16,7 @@ async function requireAuth(req, res, next) {
     if (user.subscription_status === 'cancelling' && user.plan_expires_at && new Date(user.plan_expires_at) < new Date()) {
       await pool.query(
         `UPDATE users SET subscription_status = 'inactive', plan = 'free',
-         max_hosts = 2, max_tunnels = 2, subscription_id = NULL, updated_at = NOW()
+         max_hosts = 2, max_tunnels = 2, subscription_id = NULL, plan_expires_at = NULL, updated_at = NOW()
          WHERE id = $1`,
         [user.id]
       );
@@ -25,6 +25,7 @@ async function requireAuth(req, res, next) {
       user.max_hosts = 2;
       user.max_tunnels = 2;
       user.subscription_id = null;
+      user.plan_expires_at = null;
     }
 
     req.user = user;

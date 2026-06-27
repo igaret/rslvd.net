@@ -19,7 +19,13 @@ router.post('/', async (req, res) => {
 
     if (!gateway) return res.status(503).json({ error: 'Billing is not configured' });
 
-    const notification = await gateway.webhookNotification.parse(btSignature, btPayload);
+    let notification;
+    try {
+      notification = await gateway.webhookNotification.parse(btSignature, btPayload);
+    } catch (parseErr) {
+      console.error('Webhook signature/parse error:', parseErr.message);
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
     const sub = notification.subscription;
 
     switch (notification.kind) {
@@ -61,7 +67,7 @@ router.post('/', async (req, res) => {
         if (!sub) break;
         await pool.query(
           `UPDATE users SET subscription_status = 'inactive', plan = 'free',
-           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, updated_at = NOW()
+           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, plan_expires_at = NULL, updated_at = NOW()
            WHERE subscription_id = $1`,
           [sub.id]
         );

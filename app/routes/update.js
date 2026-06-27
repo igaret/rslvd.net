@@ -35,8 +35,8 @@ router.get('/', async (req, res) => {
     if (!host) return res.status(401).send('badauth');
 
     // Check subscription
-    if (host.subscription_status !== 'active' && host.subscription_status !== 'cancelling' && host.subscription_status !== 'free') return res.status(403).send('notdonator');
-    if (host.plan_expires_at && new Date(host.plan_expires_at) < new Date()) {
+    if (host.subscription_status !== 'active' && host.subscription_status !== 'cancelling' && host.subscription_status !== 'free' && host.subscription_status !== 'inactive') return res.status(403).send('notdonator');
+    if (host.subscription_status !== 'free' && host.subscription_status !== 'inactive' && host.plan_expires_at && new Date(host.plan_expires_at) < new Date()) {
       return res.status(403).send('notdonator');
     }
 

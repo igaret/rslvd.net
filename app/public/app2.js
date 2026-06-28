@@ -2552,7 +2552,7 @@ function DDNSAutoUpdater({ hosts }) {
         : '';
       nativeDdns.setHosts({ keys }).catch(() => {});
     }
-  }, [enabled, selectedHosts]);
+  }, [enabled, selectedHosts, hosts]);
 
   const toggleHost = (id) => {
     setSelectedHosts(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);

@@ -19,6 +19,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Background worker that periodically updates DDNS hostnames with the device's
@@ -56,7 +58,8 @@ public class DdnsUpdateWorker extends Worker {
             if (key.isEmpty()) continue;
 
             try {
-                String updateUrl = BASE_URL + "/api/update?key=" + key;
+                String updateUrl = BASE_URL + "/api/update?key="
+                        + URLEncoder.encode(key, StandardCharsets.UTF_8.name());
                 URL url = new URL(updateUrl);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
@@ -67,16 +70,15 @@ public class DdnsUpdateWorker extends Worker {
                 if (code == 200) {
                     BufferedReader reader = new BufferedReader(
                             new InputStreamReader(conn.getInputStream()));
-                    StringBuilder response = new StringBuilder();
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        response.append(line);
+                        // drain response
                     }
                     reader.close();
-                    Log.d(TAG, "Updated host (key=" + key.substring(0, Math.min(key.length(), 8)) + "...): " + response);
+                    Log.d(TAG, "Host updated successfully");
                     successCount++;
                 } else {
-                    Log.w(TAG, "Update failed for key " + key.substring(0, Math.min(key.length(), 8)) + "... HTTP " + code);
+                    Log.w(TAG, "Host update failed: HTTP " + code);
                 }
                 conn.disconnect();
             } catch (Exception e) {

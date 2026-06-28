@@ -55,9 +55,11 @@ public class MainActivity extends BridgeActivity {
                 .setConstraints(constraints)
                 .build();
 
+        // KEEP avoids resetting the 15-minute timer on every cold start;
+        // DdnsPlugin uses REPLACE when the configuration actually changes.
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "rslvd_ddns_update",
-                ExistingPeriodicWorkPolicy.REPLACE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 ddnsWork
         );
     }

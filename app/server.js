@@ -9,8 +9,6 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.APP_URL }));
 
-// Raw body for Stripe webhooks
-app.use('/api/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

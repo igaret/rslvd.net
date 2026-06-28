@@ -1,95 +1,95 @@
 const router = require('express').Router();
-const stripe = require('../lib/stripe');
+const gateway = require('../lib/braintree');
 const pool = require('../db/pool');
 
-const PLAN_MAP = {
-  [process.env.STRIPE_PRICE_MONTHLY]: { plan: 'monthly', maxHosts: 4, maxTunnels: 4, months: 1 },
-  [process.env.STRIPE_PRICE_QUARTERLY]: { plan: 'quarterly', maxHosts: 12, maxTunnels: 12, months: 3 },
-  [process.env.STRIPE_PRICE_SEMI_ANNUAL]: { plan: 'semi_annual', maxHosts: 24, maxTunnels: 24, months: 6 },
-  [process.env.STRIPE_PRICE_ANNUAL]: { plan: 'annual', maxHosts: 999999, maxTunnels: 999999, months: 12 },
-};
+const PLAN_MAP = {};
+if (process.env.BRAINTREE_PLAN_MONTHLY) PLAN_MAP[process.env.BRAINTREE_PLAN_MONTHLY] = { plan: 'monthly', maxHosts: 4, maxTunnels: 4 };
+if (process.env.BRAINTREE_PLAN_QUARTERLY) PLAN_MAP[process.env.BRAINTREE_PLAN_QUARTERLY] = { plan: 'quarterly', maxHosts: 12, maxTunnels: 12 };
+if (process.env.BRAINTREE_PLAN_SEMI_ANNUAL) PLAN_MAP[process.env.BRAINTREE_PLAN_SEMI_ANNUAL] = { plan: 'semi_annual', maxHosts: 24, maxTunnels: 24 };
+if (process.env.BRAINTREE_PLAN_ANNUAL) PLAN_MAP[process.env.BRAINTREE_PLAN_ANNUAL] = { plan: 'annual', maxHosts: 999999, maxTunnels: 999999 };
 
 router.post('/', async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error('Webhook signature error:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
+    const btSignature = req.body.bt_signature;
+    const btPayload = req.body.bt_payload;
 
-  try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        if (session.mode === 'subscription') {
-          const sub = await stripe.subscriptions.retrieve(session.subscription);
-          const priceId = sub.items.data[0].price.id;
-          const planInfo = PLAN_MAP[priceId];
-          if (!planInfo) break;
+    if (!btSignature || !btPayload) {
+      return res.status(400).json({ error: 'Missing webhook data' });
+    }
 
-          const expiresAt = new Date(sub.current_period_end * 1000);
+    if (!gateway) return res.status(503).json({ error: 'Billing is not configured' });
 
-          await pool.query(
-            `UPDATE users SET subscription_id = $1, subscription_status = 'active',
-             plan = $2, max_hosts = $3, max_tunnels = $4, plan_expires_at = $5, updated_at = NOW()
-             WHERE stripe_customer_id = $6`,
-            [sub.id, planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, expiresAt, session.customer]
-          );
-        }
+    let notification;
+    try {
+      notification = await gateway.webhookNotification.parse(btSignature, btPayload);
+    } catch (parseErr) {
+      console.error('Webhook signature/parse error:', parseErr.message);
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+    const sub = notification.subscription;
+
+    switch (notification.kind) {
+      case 'subscription_charged_successfully': {
+        if (!sub) break;
+        const planInfo = PLAN_MAP[sub.planId];
+        if (!planInfo) break;
+
+        await pool.query(
+          `UPDATE users SET subscription_status = 'active', plan = $1,
+           max_hosts = $2, max_tunnels = $3, plan_expires_at = $4, updated_at = NOW()
+           WHERE subscription_id = $5`,
+          [planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, sub.paidThroughDate, sub.id]
+        );
         break;
       }
 
-      case 'invoice.paid': {
-        const invoice = event.data.object;
-        if (invoice.subscription) {
-          const sub = await stripe.subscriptions.retrieve(invoice.subscription);
-          const priceId = sub.items.data[0].price.id;
-          const planInfo = PLAN_MAP[priceId];
-          if (!planInfo) break;
-
-          const expiresAt = new Date(sub.current_period_end * 1000);
-
-          await pool.query(
-            `UPDATE users SET subscription_status = 'active', plan = $1,
-             max_hosts = $2, max_tunnels = $3, plan_expires_at = $4, updated_at = NOW()
-             WHERE stripe_customer_id = $5`,
-            [planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, expiresAt, invoice.customer]
-          );
-        }
-        break;
-      }
-
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object;
+      case 'subscription_charged_unsuccessfully': {
+        if (!sub) break;
         await pool.query(
           `UPDATE users SET subscription_status = 'past_due', updated_at = NOW()
-           WHERE stripe_customer_id = $1`,
-          [invoice.customer]
+           WHERE subscription_id = $1`,
+          [sub.id]
         );
         break;
       }
 
-      case 'customer.subscription.deleted': {
-        const sub = event.data.object;
+      case 'subscription_canceled': {
+        if (!sub) break;
         await pool.query(
-          `UPDATE users SET subscription_status = 'inactive', plan = 'none',
-           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, updated_at = NOW()
-           WHERE stripe_customer_id = $1`,
-          [sub.customer]
+          `UPDATE users SET subscription_status = 'cancelling', updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [sub.id]
         );
         break;
       }
 
-      case 'customer.subscription.updated': {
-        const sub = event.data.object;
-        const status = sub.status === 'active' ? 'active' : sub.status;
+      case 'subscription_expired': {
+        if (!sub) break;
         await pool.query(
-          `UPDATE users SET subscription_status = $1, updated_at = NOW()
-           WHERE stripe_customer_id = $2`,
-          [status, sub.customer]
+          `UPDATE users SET subscription_status = 'inactive', plan = 'free',
+           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, plan_expires_at = NULL, updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [sub.id]
+        );
+        break;
+      }
+
+      case 'subscription_went_active': {
+        if (!sub) break;
+        await pool.query(
+          `UPDATE users SET subscription_status = 'active', updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [sub.id]
+        );
+        break;
+      }
+
+      case 'subscription_went_past_due': {
+        if (!sub) break;
+        await pool.query(
+          `UPDATE users SET subscription_status = 'past_due', updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [sub.id]
         );
         break;
       }
@@ -97,7 +97,7 @@ router.post('/', async (req, res) => {
 
     res.json({ received: true });
   } catch (err) {
-    console.error('Webhook processing error:', err);
+    console.error('Webhook error:', err);
     res.status(500).json({ error: 'Webhook processing failed' });
   }
 });

@@ -1,10 +1,17 @@
 package net.rslvd.client;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.content.ContextCompat;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
@@ -21,6 +28,8 @@ public class DdnsUpdateWorker extends Worker {
     private static final String TAG = "DdnsUpdateWorker";
     private static final String PREFS_NAME = "rslvd_ddns";
     private static final String BASE_URL = "https://rslvd.net";
+    private static final String CHANNEL_ID = "rslvd_ddns_status";
+    private static final int NOTIFICATION_ID = 4201;
 
     public DdnsUpdateWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
@@ -75,7 +84,48 @@ public class DdnsUpdateWorker extends Worker {
             }
         }
 
-        Log.d(TAG, "DDNS update complete: " + successCount + "/" + updateKeys.length + " hosts updated");
+        int total = countNonEmpty(updateKeys);
+        Log.d(TAG, "DDNS update complete: " + successCount + "/" + total + " hosts updated");
+        notifyResult(successCount, total);
         return Result.success();
+    }
+
+    private int countNonEmpty(String[] keys) {
+        int n = 0;
+        for (String k : keys) if (!k.trim().isEmpty()) n++;
+        return n;
+    }
+
+    private void notifyResult(int successCount, int total) {
+        Context ctx = getApplicationContext();
+
+        // On Android 13+ the POST_NOTIFICATIONS runtime permission is required.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "DDNS Updates", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Status of background DNS updates");
+            NotificationManager nm = ctx.getSystemService(NotificationManager.class);
+            if (nm != null) nm.createNotificationChannel(channel);
+        }
+
+        String text = successCount == total
+                ? "Updated " + successCount + " hostname" + (successCount == 1 ? "" : "s")
+                : "Updated " + successCount + "/" + total + " hostnames (some failed)";
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(ctx, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                .setContentTitle("rslvd.net DDNS")
+                .setContentText(text)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true);
+
+        NotificationManagerCompat.from(ctx).notify(NOTIFICATION_ID, builder.build());
     }
 }

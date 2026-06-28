@@ -8,3 +8,8 @@ android/capacitor-android/
 *.apk
 www/
 package-lock.json
+
+# Release signing — never commit keys or their passwords
+keystore.properties
+*.jks
+*.keystore

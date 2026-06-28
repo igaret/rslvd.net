@@ -1,0 +1,12 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+captures/
+
+# Release signing — never commit keys or their passwords
+keystore.properties
+*.jks
+*.keystore

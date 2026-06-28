@@ -86,30 +86,6 @@ UPDATE users SET plan = 'free', max_hosts = 1, max_tunnels = 1 WHERE plan = 'non
 ALTER TABLE hosts ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
 ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS force_https BOOLEAN DEFAULT TRUE;
 
-CREATE TABLE IF NOT EXISTS parked_emails (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  local_part VARCHAR(64) UNIQUE NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_parked_emails_user ON parked_emails(user_id);
-CREATE INDEX IF NOT EXISTS idx_parked_emails_local ON parked_emails(local_part);
-
-CREATE TABLE IF NOT EXISTS parked_messages (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  parked_email_id UUID REFERENCES parked_emails(id) ON DELETE CASCADE,
-  from_address VARCHAR(255),
-  from_name VARCHAR(255),
-  to_address VARCHAR(255),
-  subject VARCHAR(1000),
-  text_body TEXT,
-  html_body TEXT,
-  is_read BOOLEAN DEFAULT FALSE,
-  is_trashed BOOLEAN DEFAULT FALSE,
-  is_outbound BOOLEAN DEFAULT FALSE,
-  received_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_parked_messages_email ON parked_messages(parked_email_id);
 
 CREATE TABLE IF NOT EXISTS reserved_subdomains (
   id SERIAL PRIMARY KEY,
@@ -220,20 +196,23 @@ INSERT INTO reserved_subdomains (subdomain, reason) VALUES
 ON CONFLICT (subdomain) DO NOTHING;
 
 DROP TABLE IF EXISTS email_accounts;
+DROP TABLE IF EXISTS parked_messages;
+DROP TABLE IF EXISTS parked_emails;
 
-ALTER TABLE parked_messages ADD COLUMN IF NOT EXISTS to_address VARCHAR(255);
-ALTER TABLE parked_messages ADD COLUMN IF NOT EXISTS is_read BOOLEAN DEFAULT FALSE;
-ALTER TABLE parked_messages ADD COLUMN IF NOT EXISTS is_trashed BOOLEAN DEFAULT FALSE;
-ALTER TABLE parked_messages ADD COLUMN IF NOT EXISTS is_outbound BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS tos_version_accepted VARCHAR(50);
 
--- Enforce one parked email per user (idempotent)
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parked_emails_user_id_key') THEN
-    ALTER TABLE parked_emails ADD CONSTRAINT parked_emails_user_id_key UNIQUE (user_id);
-  END IF;
-END $$;
-
-ALTER TABLE users ADD COLUMN IF NOT EXISTS braintree_customer_id VARCHAR(255);
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  token VARCHAR(255) UNIQUE NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
 `;
 
 async function run() {

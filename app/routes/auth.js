@@ -9,25 +9,14 @@ const pool = require('../db/pool');
 const activity = require('../lib/activity');
 const { sendMail } = require('../lib/mailer');
 
-const PARKED_RESERVED = ['admin', 'postmaster', 'abuse', 'noreply', 'no-reply', 'support', 'info', 'help', 'root', 'webmaster', 'mailer-daemon', 'hostmaster', 'security', 'www', 'mail', 'ftp', 'smtp', 'imap', 'pop', 'dns', 'ns1', 'ns2'];
+const CURRENT_LEGAL_VERSION = '2026-05-31';
 
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, parked_email } = req.body;
+    const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
     if (!validator.isEmail(email)) return res.status(400).json({ error: 'Invalid email' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
-    if (!parked_email) return res.status(400).json({ error: 'Choose a name for your @rslvd.net email' });
-    const localPart = parked_email.toLowerCase().trim().replace(/@.*$/, '');
-    if (!/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(localPart) || localPart.length > 64) {
-      return res.status(400).json({ error: 'Invalid email name. Use letters, numbers, dots, hyphens.' });
-    }
-    if (PARKED_RESERVED.includes(localPart)) {
-      return res.status(400).json({ error: 'That email name is reserved' });
-    }
-    const taken = await pool.query('SELECT id FROM parked_emails WHERE local_part = $1', [localPart]);
-    if (taken.rows.length > 0) return res.status(409).json({ error: `${localPart}@rslvd.net is already taken` });
 
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
     if (existing.rows[0]) return res.status(409).json({ error: 'Email already registered' });
@@ -43,31 +32,61 @@ router.post('/register', async (req, res) => {
          VALUES ($1, $2, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
         [email.toLowerCase(), hash]
       );
-
-      const user = result.rows[0];
-
-      await client.query(
-        'INSERT INTO parked_emails (user_id, local_part) VALUES ($1, $2)',
-        [user.id, localPart]
-      );
-
-      await client.query('COMMIT');
-
-      const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-
-      activity.log('user.register', { userId: user.id, detail: `${user.email} (${localPart}@rslvd.net)`, req });
-      res.status(201).json({ token, user: { id: user.id, email: user.email, plan: user.plan, maxHosts: user.max_hosts, maxTunnels: user.max_tunnels, status: user.subscription_status, role: 'user', parkedEmail: `${localPart}@rslvd.net` } });
-    } catch (txErr) {
-      await client.query('ROLLBACK');
-      throw txErr;
-    } finally {
-      client.release();
+    // Create Stripe customer
+    let stripeCustomerId = null;
+    try {
+      const customer = await stripe.customers.create({ email: email.toLowerCase() });
+      stripeCustomerId = customer.id;
+    } catch (e) {
+      console.error('Stripe customer creation failed:', e.message);
     }
+
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    const result = await pool.query(
+      `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status,
+       email_verification_token, email_verification_expires, tos_version_accepted)
+       VALUES ($1, $2, $3, 'free', 2, 2, 'free', $4, $5, $6)
+       RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels, email_verified, tos_version_accepted`,
+      [email.toLowerCase(), hash, stripeCustomerId, verifyToken, verifyExpires, CURRENT_LEGAL_VERSION]
+    );
+
+    const user = result.rows[0];
+
+    // Send verification email
+    const verifyUrl = `${process.env.APP_URL}/verify-email?token=${verifyToken}`;
+    try {
+      await sendMail({
+        to: user.email,
+        subject: 'Verify your rslvd.net email',
+        text: `Welcome to rslvd.net!\n\nPlease verify your email address by clicking the link below (expires in 24 hours):\n\n${verifyUrl}\n\nIf you didn't create this account, ignore this email.`,
+        html: `<p>Welcome to rslvd.net!</p><p>Please verify your email address:</p><p><a href="${verifyUrl}" style="font-size:16px;font-weight:bold">Verify my email →</a></p><p style="color:#888;font-size:13px">This link expires in 24 hours. If you didn't create this account, ignore this email.</p>`,
+      });
+    } catch (mailErr) {
+      console.error('Verification email failed:', mailErr.message);
+    }
+
+    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
+
+    activity.log('user.register', { userId: user.id, detail: user.email, req });
+    res.status(201).json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        plan: user.plan,
+        maxHosts: user.max_hosts,
+        maxTunnels: user.max_tunnels,
+        status: user.subscription_status,
+        role: 'user',
+        emailVerified: user.email_verified || false,
+        tosAccepted: user.tos_version_accepted === CURRENT_LEGAL_VERSION,
+        currentLegalVersion: CURRENT_LEGAL_VERSION,
+      }
+    });
   } catch (err) {
     console.error(err);
-    if (err.code === '23505' && err.constraint === 'parked_emails_local_part_key') {
-      return res.status(409).json({ error: 'That email name was just taken. Try another.' });
-    }
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -95,9 +114,6 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
     activity.log('user.login', { userId: user.id, detail: user.email, req });
 
-    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [user.id]);
-    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
-
     res.json({
       token,
       user: {
@@ -112,7 +128,9 @@ router.post('/login', async (req, res) => {
         isSiteOwner: user.is_site_owner,
         totpEnabled: user.totp_enabled,
         role: user.is_site_owner ? 'site_owner' : user.is_admin ? 'admin' : 'user',
-        parkedEmail,
+        emailVerified: user.email_verified || false,
+        tosAccepted: user.tos_version_accepted === CURRENT_LEGAL_VERSION,
+        currentLegalVersion: CURRENT_LEGAL_VERSION,
       }
     });
   } catch (err) {
@@ -122,24 +140,36 @@ router.post('/login', async (req, res) => {
 });
 
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
-  const u = req.user;
-  const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
-  const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
-  res.json({
-    id: u.id,
-    email: u.email,
-    displayName: u.display_name,
-    plan: u.plan,
-    maxHosts: u.max_hosts,
-    maxTunnels: u.max_tunnels,
-    status: u.subscription_status,
-    planExpiresAt: u.plan_expires_at,
-    isAdmin: u.is_admin,
-    isSiteOwner: u.is_site_owner,
-    totpEnabled: u.totp_enabled || false,
-    role: u.is_site_owner ? 'site_owner' : u.is_admin ? 'admin' : 'user',
-    parkedEmail,
-  });
+  try {
+    const u = req.user;
+    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
+    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
+    res.json({
+      id: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      plan: u.plan,
+      maxHosts: u.max_hosts,
+      maxTunnels: u.max_tunnels,
+      status: u.subscription_status,
+      planExpiresAt: u.plan_expires_at,
+      isAdmin: u.is_admin,
+      isSiteOwner: u.is_site_owner,
+      totpEnabled: u.totp_enabled || false,
+      role: u.is_site_owner ? 'site_owner' : u.is_admin ? 'admin' : 'user',
+      emailVerified: u.email_verified || false,
+      tosAccepted: u.tos_version_accepted === CURRENT_LEGAL_VERSION,
+      currentLegalVersion: CURRENT_LEGAL_VERSION,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch user' });
+      parkedEmail,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch user info' });
+  }
 });
 
 // ── Update profile (display name) ──────────────────────────────────────────────
@@ -292,6 +322,78 @@ router.post('/reset-password', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Password reset failed' });
   }
+});
+
+// ── Email verification ────────────────────────────────────────────────────────
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Verification token required' });
+
+    const { rows: [user] } = await pool.query(
+      `SELECT id FROM users WHERE email_verification_token = $1 AND email_verification_expires > NOW() AND email_verified = FALSE`,
+      [token]
+    );
+    if (!user) return res.status(400).json({ error: 'Verification link is invalid or has expired' });
+
+    await pool.query(
+      `UPDATE users SET email_verified = TRUE, email_verification_token = NULL, email_verification_expires = NULL, updated_at = NOW() WHERE id = $1`,
+      [user.id]
+    );
+
+    activity.log('user.email_verified', { userId: user.id, req });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Email verification failed' });
+  }
+});
+
+router.post('/resend-verification', require('../middleware/auth').requireAuth, async (req, res) => {
+  try {
+    const u = req.user;
+    if (u.email_verified) return res.json({ ok: true, message: 'Email already verified' });
+
+    const verifyToken = crypto.randomBytes(32).toString('hex');
+    const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await pool.query(
+      `UPDATE users SET email_verification_token = $1, email_verification_expires = $2, updated_at = NOW() WHERE id = $3`,
+      [verifyToken, verifyExpires, u.id]
+    );
+
+    const verifyUrl = `${process.env.APP_URL}/verify-email?token=${verifyToken}`;
+    await sendMail({
+      to: u.email,
+      subject: 'Verify your rslvd.net email',
+      text: `Please verify your email address by clicking the link below (expires in 24 hours):\n\n${verifyUrl}`,
+      html: `<p>Please verify your email address:</p><p><a href="${verifyUrl}" style="font-size:16px;font-weight:bold">Verify my email \u2192</a></p><p style="color:#888;font-size:13px">This link expires in 24 hours.</p>`,
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to resend verification email' });
+  }
+});
+
+// ── TOS / Legal acceptance ────────────────────────────────────────────────────
+router.post('/accept-legal', require('../middleware/auth').requireAuth, async (req, res) => {
+  try {
+    await pool.query(
+      `UPDATE users SET tos_version_accepted = $1, updated_at = NOW() WHERE id = $2`,
+      [CURRENT_LEGAL_VERSION, req.user.id]
+    );
+    activity.log('user.tos_accepted', { userId: req.user.id, detail: `v${CURRENT_LEGAL_VERSION}`, req });
+    res.json({ ok: true, tosAccepted: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to record legal acceptance' });
+  }
+});
+
+router.get('/legal-version', (req, res) => {
+  res.json({ version: CURRENT_LEGAL_VERSION });
 });
 
 module.exports = router;

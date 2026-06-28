@@ -1,7 +1,6 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const validator = require('validator');
 const speakeasy = require('speakeasy');
@@ -23,33 +22,15 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const result = await client.query(
-        `INSERT INTO users (email, password_hash, plan, max_hosts, max_tunnels, subscription_status)
-         VALUES ($1, $2, 'free', 2, 2, 'free') RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels`,
-        [email.toLowerCase(), hash]
-      );
-    // Create Stripe customer
-    let stripeCustomerId = null;
-    try {
-      const customer = await stripe.customers.create({ email: email.toLowerCase() });
-      stripeCustomerId = customer.id;
-    } catch (e) {
-      console.error('Stripe customer creation failed:', e.message);
-    }
-
     const verifyToken = crypto.randomBytes(32).toString('hex');
     const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
     const result = await pool.query(
-      `INSERT INTO users (email, password_hash, stripe_customer_id, plan, max_hosts, max_tunnels, subscription_status,
+      `INSERT INTO users (email, password_hash, plan, max_hosts, max_tunnels, subscription_status,
        email_verification_token, email_verification_expires, tos_version_accepted)
-       VALUES ($1, $2, $3, 'free', 2, 2, 'free', $4, $5, $6)
+       VALUES ($1, $2, 'free', 2, 2, 'free', $3, $4, $5)
        RETURNING id, email, subscription_status, plan, max_hosts, max_tunnels, email_verified, tos_version_accepted`,
-      [email.toLowerCase(), hash, stripeCustomerId, verifyToken, verifyExpires, CURRENT_LEGAL_VERSION]
+      [email.toLowerCase(), hash, verifyToken, verifyExpires, CURRENT_LEGAL_VERSION]
     );
 
     const user = result.rows[0];
@@ -142,8 +123,6 @@ router.post('/login', async (req, res) => {
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
   try {
     const u = req.user;
-    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
-    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
     res.json({
       id: u.id,
       email: u.email,
@@ -164,11 +143,6 @@ router.get('/me', require('../middleware/auth').requireAuth, async (req, res) =>
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch user' });
-      parkedEmail,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch user info' });
   }
 });
 

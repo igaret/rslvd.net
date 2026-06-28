@@ -134,6 +134,8 @@ router.post('/login', async (req, res) => {
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
   try {
     const u = req.user;
+    const pe = await pool.query('SELECT local_part FROM parked_emails WHERE user_id = $1', [u.id]);
+    const parkedEmail = pe.rows[0] ? `${pe.rows[0].local_part}@rslvd.net` : null;
     res.json({
       id: u.id,
       email: u.email,
@@ -154,6 +156,11 @@ router.get('/me', require('../middleware/auth').requireAuth, async (req, res) =>
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch user' });
+      parkedEmail,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch user info' });
   }
 });
 

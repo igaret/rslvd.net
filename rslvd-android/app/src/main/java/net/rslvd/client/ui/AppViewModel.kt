@@ -210,8 +210,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun addCustomTarget(label: String, urlTemplate: String, onDone: (Boolean) -> Unit) {
-        if (label.isBlank() || !urlTemplate.contains(DdnsTarget.IP_TOKEN)) {
+        val url = urlTemplate.trim()
+        if (label.isBlank() || !url.contains(DdnsTarget.IP_TOKEN)) {
             toast("URL must contain ${DdnsTarget.IP_TOKEN}")
+            onDone(false)
+            return
+        }
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            toast("URL must start with http:// or https://")
             onDone(false)
             return
         }
@@ -219,7 +225,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             DdnsTarget(
                 id = "custom-${System.currentTimeMillis()}",
                 label = label.trim(),
-                urlTemplate = urlTemplate.trim(),
+                urlTemplate = url,
                 provider = DdnsTarget.PROVIDER_CUSTOM,
             )
         )

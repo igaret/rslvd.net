@@ -27,8 +27,9 @@ class DdnsWorker(appContext: Context, params: WorkerParameters) :
         .build()
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // No config.enabled guard here: DdnsScheduler cancels the periodic work when
+        // disabled, and one-shot "Update now" runs must always execute.
         val config = DdnsConfig(applicationContext)
-        if (!config.enabled) return@withContext Result.success()
 
         val targets = config.getTargets()
         if (targets.isEmpty()) return@withContext Result.success()

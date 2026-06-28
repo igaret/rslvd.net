@@ -2,6 +2,7 @@ package net.rslvd.client.data
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import net.rslvd.client.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -16,21 +17,23 @@ object ApiClient {
             .add(KotlinJsonAdapterFactory())
             .build()
 
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-
-        val okhttp = OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                val builder = chain.request().newBuilder()
+                val req = chain.request().newBuilder()
                     .header("Accept", "application/json")
-                tokenStore.token?.let { builder.header("Authorization", "Bearer $it") }
-                chain.proceed(builder.build())
+                tokenStore.token?.let { req.header("Authorization", "Bearer $it") }
+                chain.proceed(req.build())
             }
-            .addInterceptor(logging)
-            .build()
+        // Only log in debug builds — BASIC logging would otherwise expose request
+        // URLs (and Authorization headers) to logcat in release builds.
+        if (BuildConfig.DEBUG) {
+            builder.addInterceptor(
+                HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC }
+            )
+        }
+        val okhttp = builder.build()
 
         return Retrofit.Builder()
             .baseUrl(BASE_URL)

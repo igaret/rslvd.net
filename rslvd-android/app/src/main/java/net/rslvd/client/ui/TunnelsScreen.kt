@@ -165,9 +165,10 @@ private fun AddTunnelDialog(
             }
         },
         confirmButton = {
+            val portNum = port.toIntOrNull()
             TextButton(
-                enabled = name.isNotBlank() && port.toIntOrNull() != null,
-                onClick = { onConfirm(name, port.toInt(), host, proto, https) },
+                enabled = name.isNotBlank() && portNum != null && portNum in 1..65535,
+                onClick = { onConfirm(name, portNum!!, host, proto, https) },
             ) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

@@ -24,7 +24,7 @@ interface ApiService {
     suspend fun createHost(@Body body: CreateHostRequest): Response<Host>
 
     @DELETE("hosts/{id}")
-    suspend fun deleteHost(@Path("id") id: Int): Response<GenericResponse>
+    suspend fun deleteHost(@Path("id") id: String): Response<GenericResponse>
 
     @GET("tunnels")
     suspend fun tunnels(): Response<List<Tunnel>>
@@ -33,5 +33,5 @@ interface ApiService {
     suspend fun createTunnel(@Body body: CreateTunnelRequest): Response<Tunnel>
 
     @DELETE("tunnels/{id}")
-    suspend fun deleteTunnel(@Path("id") id: Int): Response<GenericResponse>
+    suspend fun deleteTunnel(@Path("id") id: String): Response<GenericResponse>
 }

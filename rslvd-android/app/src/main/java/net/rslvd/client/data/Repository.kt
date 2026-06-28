@@ -58,14 +58,14 @@ class Repository private constructor(
     suspend fun createHost(hostname: String, forceHttps: Boolean): Result<Host> =
         call { api.createHost(CreateHostRequest(hostname.trim().lowercase(), forceHttps)) }
 
-    suspend fun deleteHost(id: Int): Result<Unit> = callUnit { api.deleteHost(id) }
+    suspend fun deleteHost(id: String): Result<Unit> = callUnit { api.deleteHost(id) }
 
     suspend fun tunnels(): Result<List<Tunnel>> = call { api.tunnels() }
 
     suspend fun createTunnel(name: String, port: Int, host: String, protocol: String, forceHttps: Boolean): Result<Tunnel> =
         call { api.createTunnel(CreateTunnelRequest(name.trim().lowercase(), port, host.trim().ifBlank { "localhost" }, protocol, forceHttps)) }
 
-    suspend fun deleteTunnel(id: Int): Result<Unit> = callUnit { api.deleteTunnel(id) }
+    suspend fun deleteTunnel(id: String): Result<Unit> = callUnit { api.deleteTunnel(id) }
 
     fun logout() = tokenStore.clear()
 

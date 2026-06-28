@@ -3,7 +3,7 @@ package net.rslvd.client.data
 import com.squareup.moshi.Json
 
 data class User(
-    val id: Int,
+    val id: String,
     val email: String,
     val displayName: String? = null,
     val plan: String? = null,
@@ -37,7 +37,7 @@ data class RegisterRequest(
 )
 
 data class Host(
-    val id: Int,
+    val id: String,
     val hostname: String,
     val fqdn: String,
     @Json(name = "ip_address") val ipAddress: String? = null,
@@ -46,18 +46,18 @@ data class Host(
     @Json(name = "update_key") val updateKey: String? = null,
     val active: Boolean = true,
     @Json(name = "created_at") val createdAt: String? = null,
-    @Json(name = "parent_host_id") val parentHostId: Int? = null,
+    @Json(name = "parent_host_id") val parentHostId: String? = null,
     @Json(name = "force_https") val forceHttps: Boolean = true,
 )
 
 data class CreateHostRequest(
     val hostname: String,
     @Json(name = "force_https") val forceHttps: Boolean = true,
-    @Json(name = "parent_id") val parentId: Int? = null,
+    @Json(name = "parent_id") val parentId: String? = null,
 )
 
 data class Tunnel(
-    val id: Int,
+    val id: String,
     val name: String,
     @Json(name = "tunnel_port") val tunnelPort: Int? = null,
     @Json(name = "target_host") val targetHost: String? = null,
@@ -68,7 +68,7 @@ data class Tunnel(
     val token: String? = null,
     val active: Boolean = true,
     @Json(name = "created_at") val createdAt: String? = null,
-    @Json(name = "parent_tunnel_id") val parentTunnelId: Int? = null,
+    @Json(name = "parent_tunnel_id") val parentTunnelId: String? = null,
     @Json(name = "force_https") val forceHttps: Boolean = true,
 )
 

@@ -2494,6 +2494,9 @@ function DDNSAutoUpdater({ hosts }) {
 
   const hostsWithKey = hosts.filter(h => h.update_key);
 
+  const nativeDdns = (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.())
+    ? window.Capacitor.Plugins?.DdnsClient : null;
+
   // Listen for SW messages
   useEffect(() => {
     if (!navigator.serviceWorker) return;
@@ -2539,7 +2542,17 @@ function DDNSAutoUpdater({ hosts }) {
         }
       });
     }
-  }, [enabled, selectedHosts]);
+
+    // In the native Android app, hand the update keys to the native WorkManager
+    // updater for reliable background updates (service-worker periodic sync is
+    // unavailable inside the WebView).
+    if (nativeDdns) {
+      const keys = enabled
+        ? selectedHosts.map(id => hosts.find(x => x.id === id)?.update_key).filter(Boolean).join(',')
+        : '';
+      nativeDdns.setHosts({ keys }).catch(() => {});
+    }
+  }, [enabled, selectedHosts, hosts]);
 
   const toggleHost = (id) => {
     setSelectedHosts(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2563,6 +2576,10 @@ function DDNSAutoUpdater({ hosts }) {
       }
       setLastUpdate(new Date().toLocaleTimeString());
       setStatus(`Updated ${updated} host(s) to ${ip}`);
+
+      // Also trigger an immediate native background update so the app's
+      // WorkManager state stays in sync.
+      if (nativeDdns) nativeDdns.updateNow().catch(() => {});
     } catch (err) {
       setStatus(`Error: ${err.message}`);
     } finally {
@@ -2577,7 +2594,12 @@ function DDNSAutoUpdater({ hosts }) {
       React.createElement('div', null,
         React.createElement('h3', { style: { fontSize: 16, marginBottom: 4 } }, 'DDNS Auto-Updater'),
         React.createElement('p', { style: { fontSize: 13, color: 'var(--text2)' } },
-          'Keep your subdomains pointed at this device\'s IP — works in the background when the app is installed.'
+          nativeDdns
+            ? 'Keep your subdomains pointed at this device\'s IP — the app updates them every 15 min in the background.'
+            : 'Keep your subdomains pointed at this device\'s IP — works in the background when the app is installed.'
+        ),
+        nativeDdns && enabled && React.createElement('p', { style: { fontSize: 12, color: 'var(--green)', marginTop: 4 } },
+          '● Native background updates active'
         )
       ),
       React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' } },

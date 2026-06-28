@@ -4,7 +4,7 @@
   "description": "rslvd.net Android client - DDNS & Tunnel management",
   "private": true,
   "scripts": {
-    "build": "cp -r ../app/public/* www/",
+    "build": "rm -rf www && mkdir -p www && cp -r ../app/public/* www/ && rm -rf www/dl www/img/tutorials",
     "cap:sync": "npx cap sync android",
     "cap:build": "npx cap sync android && cd android && ./gradlew bundleRelease"
   },

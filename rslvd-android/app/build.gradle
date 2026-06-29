@@ -15,14 +15,14 @@ if (hasKeystore) {
 
 android {
     namespace 'net.rslvd.client'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId 'net.rslvd.client'
         minSdk 23
-        targetSdk 34
-        versionCode 3
-        versionName '2.0'
+        targetSdk 35
+        versionCode 4
+        versionName '2.1'
         vectorDrawables { useSupportLibrary true }
     }
 

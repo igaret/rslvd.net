@@ -14,6 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/account', require('./routes/account'));
 app.use('/api/hosts', require('./routes/hosts'));
 app.use('/api/billing', require('./routes/billing'));
 app.use('/api/webhook', require('./routes/webhook'));

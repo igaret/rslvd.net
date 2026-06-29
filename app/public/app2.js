@@ -2024,7 +2024,7 @@ function EditUserModal({ user: u, isSiteOwner, onClose, onSaved }) {
 }
 
 // ── Account Page ─────────────────────────────────────────────────────────────
-function AccountPage({ user, navigate, refreshUser }) {
+function AccountPage({ user, navigate, refreshUser, logout }) {
   const [tab, setTab] = useState('profile');
   return React.createElement('div', { className: 'dashboard' },
     React.createElement('div', { className: 'dashboard-header' },
@@ -2035,7 +2035,7 @@ function AccountPage({ user, navigate, refreshUser }) {
       React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => navigate('/dashboard') }, '← Dashboard')
     ),
     React.createElement('div', { style: { display: 'flex', gap: 4, marginBottom: 28, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' } },
-      [['profile', '👤 Profile'], ['security', '🔐 Security'], ['activity', '📋 Login history']].map(([key, label]) =>
+      [['profile', '👤 Profile'], ['security', '🔐 Security'], ['activity', '📋 Login history'], ['danger', '🗑️ Delete account']].map(([key, label]) =>
         React.createElement('button', {
           key, onClick: () => setTab(key),
           style: { padding: '10px 20px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'Inter, sans-serif', color: tab === key ? 'var(--text)' : 'var(--text2)', borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent', marginBottom: -1 }
@@ -2044,7 +2044,53 @@ function AccountPage({ user, navigate, refreshUser }) {
     ),
     tab === 'profile'  && React.createElement(ProfileTab,       { user, refreshUser }),
     tab === 'security' && React.createElement(SecurityTab,      { user, refreshUser }),
-    tab === 'activity' && React.createElement(LoginHistoryTab,  {})
+    tab === 'activity' && React.createElement(LoginHistoryTab,  {}),
+    tab === 'danger'   && React.createElement(DeleteAccountTab,  { user, navigate, logout })
+  );
+}
+
+function DeleteAccountTab({ user, navigate, logout }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const isOwner = user.role === 'site_owner';
+  const canDelete = !isOwner && password.length > 0 && confirm === 'DELETE';
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!canDelete) return;
+    setError(''); setLoading(true);
+    try {
+      await API.post('/account/delete', { password });
+      logout();
+      navigate('/');
+    } catch (err) { setError(err.message); setLoading(false); }
+  };
+
+  return React.createElement('div', { style: { maxWidth: 480 } },
+    React.createElement('div', { className: 'card', style: { border: '1px solid var(--danger, #e5484d)' } },
+      React.createElement('h3', { style: { marginBottom: 8, color: 'var(--danger, #e5484d)' } }, 'Delete account'),
+      React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 16 } },
+        'This permanently deletes your account and all of your hostnames and tunnels. Any active subscription is cancelled. This cannot be undone.'),
+      isOwner
+        ? React.createElement(Alert, null, 'Site owner accounts cannot be deleted here.')
+        : React.createElement('form', { onSubmit: submit },
+            error && React.createElement(Alert, null, error),
+            React.createElement('div', { className: 'form-group' },
+              React.createElement('label', { className: 'form-label' }, 'Confirm your password'),
+              React.createElement('input', { className: 'input', type: 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: 'current-password' })
+            ),
+            React.createElement('div', { className: 'form-group' },
+              React.createElement('label', { className: 'form-label' }, 'Type DELETE to confirm'),
+              React.createElement('input', { className: 'input', value: confirm, onChange: e => setConfirm(e.target.value), placeholder: 'DELETE' })
+            ),
+            React.createElement('button', { className: 'btn btn-danger', type: 'submit', disabled: !canDelete || loading },
+              loading ? React.createElement(Spinner) : 'Permanently delete my account'
+            )
+          )
+    )
   );
 }
 
@@ -3329,7 +3375,7 @@ function App() {
     path === '/forgot-password' && React.createElement(ForgotPasswordPage, { navigate }),
     path === '/reset-password' && React.createElement(ResetPasswordPage, { navigate }),
     path === '/dashboard' && auth.user && React.createElement(Dashboard, { user: auth.user, navigate, refreshUser: auth.refreshUser, pwa }),
-    path === '/account' && auth.user && React.createElement(AccountPage, { user: auth.user, navigate, refreshUser: auth.refreshUser }),
+    path === '/account' && auth.user && React.createElement(AccountPage, { user: auth.user, navigate, refreshUser: auth.refreshUser, logout: auth.logout }),
     path === '/admin' && auth.user && (auth.user.role === 'admin' || auth.user.role === 'site_owner') &&
       React.createElement(AdminDashboard, { user: auth.user, navigate }),
     path === '/terms'   && React.createElement(TermsPage,   { navigate }),

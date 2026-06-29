@@ -2060,6 +2060,7 @@ function DeleteAccountTab({ user, navigate, logout }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!canDelete) return;
     setError(''); setLoading(true);
     try {
       await API.post('/account/delete', { password });

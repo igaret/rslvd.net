@@ -33,7 +33,7 @@
 - **🌐 Dynamic DNS** - Automatic IP updates via HTTP API, compatible with any DynDNS client
 - **🚇 CGNAT Tunnels** - TCP tunnels that work behind carrier-grade NAT without port forwarding
 - **🔒 Free SSL Certificates** - Automatic Let's Encrypt integration
-- **💳 Subscription Billing** - Stripe integration with multiple pricing tiers
+- **💳 Subscription Billing** - Square integration with multiple pricing tiers
 - **📱 Multi-Platform** - Tunnel client binaries for Linux, macOS, Windows, Android (Termux), and routers
 - **🛡️ Admin Dashboard** - Built-in user management and activity logging
 - **⚡ WebSocket Support** - Full WebSocket and binary protocol support through tunnels
@@ -109,7 +109,7 @@ sudo apt install -y certbot python3-certbot-nginx
 | Service | Purpose | Setup Required |
 |---------|---------|----------------|
 | IONOS DNS | DNS record management | [Get API Key](https://developer.hosting.ionos.com/) |
-| Stripe | Payment processing | [Stripe Dashboard](https://dashboard.stripe.com) |
+| Square | Payment processing | [Square Developer Dashboard](https://developer.squareup.com/apps) |
 | Domain | Your domain name | Configure nameservers to IONOS |
 
 ---
@@ -238,14 +238,12 @@ JWT_SECRET=your_random_jwt_secret_here
 # IONOS DNS API
 IONOS_API_KEY=your_ionos_api_key_here
 
-# Stripe
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_PUBLISHABLE_KEY=pk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PRICE_MONTHLY=price_...
-STRIPE_PRICE_QUARTERLY=price_...
-STRIPE_PRICE_SEMI_ANNUAL=price_...
-STRIPE_PRICE_ANNUAL=price_...
+# Square
+SQUARE_ACCESS_TOKEN=EAAA...
+SQUARE_APPLICATION_ID=sq0idp-...
+SQUARE_LOCATION_ID=L...
+SQUARE_ENVIRONMENT=production
+SQUARE_WEBHOOK_SIGNATURE_KEY=...
 
 # Domain
 BASE_DOMAIN=example.com
@@ -618,7 +616,7 @@ sudo apt install -y certbot python3-certbot-nginx
 | Service | Purpose | Setup Required |
 |---------|---------|----------------|
 | IONOS DNS | DNS record management | [Get API Key](https://developer.hosting.ionos.com/) |
-| Stripe | Payment processing | [Stripe Dashboard](https://dashboard.stripe.com) |
+| Square | Payment processing | [Square Developer Dashboard](https://developer.squareup.com/apps) |
 | Domain | Your domain name | Configure nameservers to IONOS |
 
 ---
@@ -747,14 +745,12 @@ JWT_SECRET=your_random_jwt_secret_here
 # IONOS DNS API
 IONOS_API_KEY=your_ionos_api_key_here
 
-# Stripe
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_PUBLISHABLE_KEY=pk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_PRICE_MONTHLY=price_...
-STRIPE_PRICE_QUARTERLY=price_...
-STRIPE_PRICE_SEMI_ANNUAL=price_...
-STRIPE_PRICE_ANNUAL=price_...
+# Square
+SQUARE_ACCESS_TOKEN=EAAA...
+SQUARE_APPLICATION_ID=sq0idp-...
+SQUARE_LOCATION_ID=L...
+SQUARE_ENVIRONMENT=production
+SQUARE_WEBHOOK_SIGNATURE_KEY=...
 
 # Domain
 BASE_DOMAIN=rslvd.net
@@ -764,7 +760,7 @@ SERVER_IP=your_server_ip
 
 ### Pricing Plans
 
-Configure in Stripe Dashboard:
+Plans are defined in `app/lib/plans.js` and charged via the Square Payments API:
 
 | Plan | Price | Hosts | Tunnels |
 |------|-------|-------|---------|

@@ -197,7 +197,7 @@ router.get('/config', requireSiteOwner, async (req, res) => {
     app_url: process.env.APP_URL,
     server_ip: process.env.SERVER_IP || '13.220.239.207',
     node_env: process.env.NODE_ENV,
-    braintree_configured: !!process.env.BRAINTREE_MERCHANT_ID,
+    square_configured: !!process.env.SQUARE_ACCESS_TOKEN,
     ionos_configured: !!process.env.IONOS_API_KEY,
   });
 });
@@ -206,7 +206,7 @@ router.get('/config', requireSiteOwner, async (req, res) => {
 router.get('/backup', requireSiteOwner, async (req, res) => {
   try {
     const [users, hosts, tunnels, reserved, activity] = await Promise.all([
-      pool.query(`SELECT id, email, password_hash, stripe_customer_id, braintree_customer_id, subscription_id,
+      pool.query(`SELECT id, email, password_hash, square_customer_id, square_card_id, subscription_id,
                          subscription_status, plan, plan_expires_at, max_hosts, max_tunnels,
                          is_admin, is_site_owner, display_name, totp_secret, totp_enabled,
                          created_at, updated_at FROM users ORDER BY created_at`),
@@ -259,13 +259,13 @@ router.post('/restore', requireSiteOwner, async (req, res) => {
       const exists = await client.query('SELECT id FROM users WHERE email = $1', [u.email]);
       if (exists.rows.length === 0) {
         await client.query(
-          `INSERT INTO users (id, email, password_hash, stripe_customer_id, braintree_customer_id, subscription_id,
+          `INSERT INTO users (id, email, password_hash, square_customer_id, square_card_id, subscription_id,
                               subscription_status, plan, plan_expires_at, max_hosts, max_tunnels,
                               is_admin, is_site_owner, display_name, totp_secret, totp_enabled,
                               created_at, updated_at)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
            ON CONFLICT (id) DO NOTHING`,
-          [u.id, u.email, u.password_hash, u.stripe_customer_id, u.braintree_customer_id, u.subscription_id,
+          [u.id, u.email, u.password_hash, u.square_customer_id, u.square_card_id, u.subscription_id,
            u.subscription_status, u.plan, u.plan_expires_at, u.max_hosts, u.max_tunnels,
            u.is_admin, u.is_site_owner, u.display_name, u.totp_secret, u.totp_enabled || false,
            u.created_at, u.updated_at]

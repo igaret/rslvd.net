@@ -5,7 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const tunnelCert = require('../lib/tunnel-cert');
 const activity = require('../lib/activity');
-const gateway = require('../lib/braintree');
+const square = require('../lib/square');
 
 // ── Delete account ──────────────────────────────────────────────────────────
 // Permanently deletes the user, cancels any active subscription, and removes
@@ -24,14 +24,12 @@ router.post('/delete', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Site owner accounts cannot be deleted from here.' });
     }
 
-    // Cancel any active subscription (best-effort)
-    if (gateway && user.subscription_id) {
+    // Disable the stored card so no future renewal charges occur (best-effort)
+    if (square.configured && user.square_card_id) {
       try {
-        await gateway.subscription.cancel(user.subscription_id);
+        await square.client.cards.disable({ cardId: user.square_card_id });
       } catch (e) {
-        if (!e.message || !e.message.includes('has already been canceled')) {
-          console.error('Account delete: subscription cancel failed:', e.message);
-        }
+        console.error('Account delete: card disable failed:', e.message);
       }
     }
 

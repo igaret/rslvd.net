@@ -1,95 +1,69 @@
+const crypto = require('crypto');
 const router = require('express').Router();
-const gateway = require('../lib/braintree');
 const pool = require('../db/pool');
 
-const PLAN_MAP = {};
-if (process.env.BRAINTREE_PLAN_MONTHLY) PLAN_MAP[process.env.BRAINTREE_PLAN_MONTHLY] = { plan: 'monthly', maxHosts: 4, maxTunnels: 4 };
-if (process.env.BRAINTREE_PLAN_QUARTERLY) PLAN_MAP[process.env.BRAINTREE_PLAN_QUARTERLY] = { plan: 'quarterly', maxHosts: 12, maxTunnels: 12 };
-if (process.env.BRAINTREE_PLAN_SEMI_ANNUAL) PLAN_MAP[process.env.BRAINTREE_PLAN_SEMI_ANNUAL] = { plan: 'semi_annual', maxHosts: 24, maxTunnels: 24 };
-if (process.env.BRAINTREE_PLAN_ANNUAL) PLAN_MAP[process.env.BRAINTREE_PLAN_ANNUAL] = { plan: 'annual', maxHosts: 999999, maxTunnels: 999999 };
-
+// Square webhook notifications. Renewals are managed by the in-process
+// billing-renewal job; this handler reacts to out-of-band events (refunds,
+// disputes, failed payments) and keeps subscription state in sync.
 router.post('/', async (req, res) => {
   try {
-    const btSignature = req.body.bt_signature;
-    const btPayload = req.body.bt_payload;
+    const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY;
+    const notificationUrl = process.env.SQUARE_WEBHOOK_URL || `${process.env.APP_URL}/api/webhook`;
 
-    if (!btSignature || !btPayload) {
-      return res.status(400).json({ error: 'Missing webhook data' });
+    if (!signatureKey) return res.status(503).json({ error: 'Webhooks not configured' });
+
+    const signature = req.get('x-square-hmacsha256-signature');
+    if (!signature || !req.rawBody) {
+      return res.status(400).json({ error: 'Missing webhook signature' });
     }
 
-    if (!gateway) return res.status(503).json({ error: 'Billing is not configured' });
-
-    let notification;
-    try {
-      notification = await gateway.webhookNotification.parse(btSignature, btPayload);
-    } catch (parseErr) {
-      console.error('Webhook signature/parse error:', parseErr.message);
+    const expected = crypto.createHmac('sha256', signatureKey)
+      .update(notificationUrl + req.rawBody.toString('utf8'))
+      .digest('base64');
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      console.error('Webhook: invalid Square signature');
       return res.status(400).json({ error: 'Invalid webhook signature' });
     }
-    const sub = notification.subscription;
 
-    switch (notification.kind) {
-      case 'subscription_charged_successfully': {
-        if (!sub) break;
-        const planInfo = PLAN_MAP[sub.planId];
-        if (!planInfo) break;
+    const event = req.body;
+    const type = event && event.type;
 
+    switch (type) {
+      case 'refund.created':
+      case 'refund.updated': {
+        const refund = event.data && event.data.object && event.data.object.refund;
+        if (!refund || refund.status !== 'COMPLETED' || !refund.payment_id) break;
         await pool.query(
-          `UPDATE users SET subscription_status = 'active', plan = $1,
-           max_hosts = $2, max_tunnels = $3, plan_expires_at = $4, updated_at = NOW()
-           WHERE subscription_id = $5`,
-          [planInfo.plan, planInfo.maxHosts, planInfo.maxTunnels, sub.paidThroughDate, sub.id]
+          `UPDATE users SET subscription_status = 'inactive', plan = 'free', max_hosts = 2, max_tunnels = 2,
+           subscription_id = NULL, plan_expires_at = NULL, updated_at = NOW()
+           WHERE subscription_id = $1`,
+          [refund.payment_id]
         );
         break;
       }
 
-      case 'subscription_charged_unsuccessfully': {
-        if (!sub) break;
-        await pool.query(
-          `UPDATE users SET subscription_status = 'past_due', updated_at = NOW()
-           WHERE subscription_id = $1`,
-          [sub.id]
-        );
+      case 'payment.updated': {
+        const payment = event.data && event.data.object && event.data.object.payment;
+        if (!payment) break;
+        if (payment.status === 'FAILED' || payment.status === 'CANCELED') {
+          await pool.query(
+            `UPDATE users SET subscription_status = 'past_due', updated_at = NOW()
+             WHERE subscription_id = $1 AND subscription_status = 'active'`,
+            [payment.id]
+          );
+        }
         break;
       }
 
-      case 'subscription_canceled': {
-        if (!sub) break;
+      case 'dispute.created': {
+        const dispute = event.data && event.data.object && event.data.object.dispute;
+        const paymentId = dispute && dispute.disputed_payment && dispute.disputed_payment.payment_id;
+        if (!paymentId) break;
         await pool.query(
-          `UPDATE users SET subscription_status = 'cancelling', updated_at = NOW()
-           WHERE subscription_id = $1`,
-          [sub.id]
-        );
-        break;
-      }
-
-      case 'subscription_expired': {
-        if (!sub) break;
-        await pool.query(
-          `UPDATE users SET subscription_status = 'inactive', plan = 'free',
-           max_hosts = 2, max_tunnels = 2, subscription_id = NULL, plan_expires_at = NULL, updated_at = NOW()
-           WHERE subscription_id = $1`,
-          [sub.id]
-        );
-        break;
-      }
-
-      case 'subscription_went_active': {
-        if (!sub) break;
-        await pool.query(
-          `UPDATE users SET subscription_status = 'active', updated_at = NOW()
-           WHERE subscription_id = $1`,
-          [sub.id]
-        );
-        break;
-      }
-
-      case 'subscription_went_past_due': {
-        if (!sub) break;
-        await pool.query(
-          `UPDATE users SET subscription_status = 'past_due', updated_at = NOW()
-           WHERE subscription_id = $1`,
-          [sub.id]
+          `UPDATE users SET subscription_status = 'past_due', updated_at = NOW() WHERE subscription_id = $1`,
+          [paymentId]
         );
         break;
       }

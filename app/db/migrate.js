@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  stripe_customer_id VARCHAR(255),
+  square_customer_id VARCHAR(255),
+  square_card_id VARCHAR(255),
   subscription_id VARCHAR(255),
   subscription_status VARCHAR(50) DEFAULT 'inactive',
   plan VARCHAR(50) DEFAULT 'free',
@@ -203,6 +204,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS tos_version_accepted VARCHAR(50);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS square_customer_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS square_card_id VARCHAR(255);
+ALTER TABLE users DROP COLUMN IF EXISTS stripe_customer_id;
+ALTER TABLE users DROP COLUMN IF EXISTS braintree_customer_id;
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

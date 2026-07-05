@@ -1134,8 +1134,8 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [showUpdatePM, setShowUpdatePM] = useState(false);
-  const btDropinRef = useRef(null);
-  const btContainerRef = useRef(null);
+  const sqCardRef = useRef(null);
+  const sqPaymentsRef = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1171,48 +1171,68 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
     if (tab === 'billing' && (user.status === 'active' || user.status === 'cancelling')) loadSubscription();
   }, [tab]);
 
-  const initDropin = async (containerId) => {
+  const loadSquareSdk = (environment) => new Promise((resolve, reject) => {
+    if (window.Square) return resolve();
+    const script = document.createElement('script');
+    script.src = environment === 'production'
+      ? 'https://web.squarecdn.com/v1/square.js'
+      : 'https://sandbox.web.squarecdn.com/v1/square.js';
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('Failed to load payment SDK'));
+    document.head.appendChild(script);
+  });
+
+  const initCard = async (containerId) => {
     try {
-      if (btDropinRef.current) { btDropinRef.current.teardown(() => {}); btDropinRef.current = null; }
-      const { clientToken } = await API.post('/billing/client-token');
+      if (sqCardRef.current) { await sqCardRef.current.destroy().catch(() => {}); sqCardRef.current = null; }
+      const config = await API.get('/billing/config');
+      await loadSquareSdk(config.environment);
       const container = document.getElementById(containerId);
       if (!container) return;
       container.innerHTML = '';
-      btDropinRef.current = await new Promise((resolve, reject) => {
-        braintree.dropin.create({ authorization: clientToken, container: '#' + containerId }, (err, inst) => {
-          if (err) reject(err); else resolve(inst);
-        });
-      });
-    } catch (e) { console.error('Drop-in init failed:', e); }
+      if (!sqPaymentsRef.current) {
+        sqPaymentsRef.current = window.Square.payments(config.applicationId, config.locationId);
+      }
+      const card = await sqPaymentsRef.current.card();
+      await card.attach('#' + containerId);
+      sqCardRef.current = card;
+    } catch (e) { console.error('Card form init failed:', e); }
   };
 
-  const teardownDropin = () => {
-    if (btDropinRef.current) { btDropinRef.current.teardown(() => {}); btDropinRef.current = null; }
+  const teardownCard = () => {
+    if (sqCardRef.current) { sqCardRef.current.destroy().catch(() => {}); sqCardRef.current = null; }
   };
 
   useEffect(() => {
-    if (selectedPlan) initDropin('bt-dropin-subscribe');
-    else teardownDropin();
-    return () => teardownDropin();
+    if (selectedPlan) initCard('sq-card-subscribe');
+    else teardownCard();
+    return () => teardownCard();
   }, [selectedPlan]);
 
   useEffect(() => {
-    if (showUpdatePM) initDropin('bt-dropin-update');
-    else teardownDropin();
-    return () => teardownDropin();
+    if (showUpdatePM) initCard('sq-card-update');
+    else teardownCard();
+    return () => teardownCard();
   }, [showUpdatePM]);
 
+  const tokenizeCard = async () => {
+    const result = await sqCardRef.current.tokenize();
+    if (result.status !== 'OK') {
+      const detail = result.errors && result.errors[0] && result.errors[0].message;
+      throw new Error(detail || 'Card details are invalid');
+    }
+    return result.token;
+  };
+
   const handleSubscribe = async () => {
-    if (!btDropinRef.current) return;
+    if (!sqCardRef.current) return;
     setPaymentLoading(true);
     try {
-      const payload = await new Promise((resolve, reject) => {
-        btDropinRef.current.requestPaymentMethod((err, p) => { if (err) reject(err); else resolve(p); });
-      });
-      await API.post('/billing/subscribe', { plan: selectedPlan, nonce: payload.nonce });
+      const sourceId = await tokenizeCard();
+      await API.post('/billing/subscribe', { plan: selectedPlan, sourceId });
       setMsg('Subscription activated!');
       setSelectedPlan(null);
-      teardownDropin();
+      teardownCard();
       setTimeout(() => refreshUser(), 1500);
     } catch (e) { alert(e.message || 'Payment failed'); }
     finally { setPaymentLoading(false); }
@@ -1231,16 +1251,14 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   };
 
   const handleUpdatePayment = async () => {
-    if (!btDropinRef.current) return;
+    if (!sqCardRef.current) return;
     setPaymentLoading(true);
     try {
-      const payload = await new Promise((resolve, reject) => {
-        btDropinRef.current.requestPaymentMethod((err, p) => { if (err) reject(err); else resolve(p); });
-      });
-      await API.post('/billing/update-payment', { nonce: payload.nonce });
+      const sourceId = await tokenizeCard();
+      await API.post('/billing/update-payment', { sourceId });
       setMsg('Payment method updated!');
       setShowUpdatePM(false);
-      teardownDropin();
+      teardownCard();
       loadSubscription();
     } catch (e) { alert(e.message); }
     finally { setPaymentLoading(false); }
@@ -1392,7 +1410,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
           ),
           showUpdatePM && React.createElement('div', { className: 'card mb-4' },
             React.createElement('h3', { style: { marginBottom: 12 } }, 'Update Payment Method'),
-            React.createElement('div', { id: 'bt-dropin-update' }),
+            React.createElement('div', { id: 'sq-card-update' }),
             React.createElement('button', { className: 'btn btn-primary', style: { marginTop: 12 }, onClick: handleUpdatePayment, disabled: paymentLoading },
               paymentLoading ? React.createElement(Spinner) : 'Update'
             )
@@ -1430,7 +1448,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
           selectedPlan && React.createElement('div', { className: 'card', style: { marginTop: 16 } },
             React.createElement('h3', { style: { marginBottom: 4 } }, `Subscribe to ${planLabel[selectedPlan]}`),
             React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 16 } }, `${plans.find(p => p.key === selectedPlan)?.amount || ''} · Cancel anytime`),
-            React.createElement('div', { id: 'bt-dropin-subscribe' }),
+            React.createElement('div', { id: 'sq-card-subscribe' }),
             React.createElement('button', { className: 'btn btn-primary w-full', style: { marginTop: 12 }, onClick: handleSubscribe, disabled: paymentLoading },
               paymentLoading ? React.createElement(Spinner) : 'Pay & Subscribe'
             )
@@ -2380,7 +2398,7 @@ function TermsPage({ navigate }) {
     ),
 
     React.createElement(Section, { title: '6. Billing and Refunds' },
-      React.createElement(P, null, 'Paid plans are billed in advance through Braintree (a PayPal service). All charges are non-refundable except where required by applicable law. Downgrading or cancelling a plan takes effect at the end of the current billing period. We reserve the right to change pricing with 30 days notice.')
+      React.createElement(P, null, 'Paid plans are billed in advance through Square. All charges are non-refundable except where required by applicable law. Downgrading or cancelling a plan takes effect at the end of the current billing period. We reserve the right to change pricing with 30 days notice.')
     ),
 
     React.createElement(Section, { title: '7. Intellectual Property' },
@@ -2419,7 +2437,7 @@ function PrivacyPage({ navigate }) {
       React.createElement(Li, { items: [
         'Account information: email address and hashed password when you register.',
         'Usage data: IP addresses, DNS update requests, tunnel connection timestamps, and error logs.',
-        'Billing data: payment details are handled by Braintree (a PayPal service) and never stored on our servers.',
+        'Billing data: payment details are handled by Square and never stored on our servers.',
         'Device/platform data: the binary platform you use to connect (e.g. linux-amd64) for diagnostic purposes.',
       ]})
     ),
@@ -2447,7 +2465,7 @@ function PrivacyPage({ navigate }) {
     React.createElement(Section, { title: '5. Data Sharing' },
       React.createElement(P, null, 'We do not sell, rent, or trade your personal information. We may share data with:'),
       React.createElement(Li, { items: [
-        'Braintree (PayPal) — for payment processing.',
+        'Square — for payment processing.',
         'IONOS — for DNS record management.',
         'Law enforcement or government authorities — if required by law or to protect the safety of users.',
       ]})

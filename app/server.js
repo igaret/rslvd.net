@@ -9,7 +9,7 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: process.env.APP_URL }));
 
-app.use(express.json());
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
@@ -46,4 +46,5 @@ app.listen(PORT, () => {
   console.log(`rslvd.net DDNS server running on port ${PORT}`);
   require('./db/migrate').run();
   require('./lib/tunnel-proxy').startTunnelProxy();
+  require('./lib/billing-renewal').startRenewalJob();
 });

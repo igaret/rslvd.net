@@ -3,6 +3,7 @@ package net.rslvd.client.ui
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -29,6 +30,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Hosts("Hosts", Icons.Filled.Dns),
     Tunnels("Tunnels", Icons.Filled.SwapHoriz),
     Ddns("DDNS", Icons.Filled.Sync),
+    Billing("Billing", Icons.Filled.CreditCard),
     Account("Account", Icons.Filled.AccountCircle),
 }
 
@@ -67,6 +69,7 @@ fun MainScaffold(vm: AppViewModel) {
             Tab.Hosts -> HostsScreen(vm, mod)
             Tab.Tunnels -> TunnelsScreen(vm, mod)
             Tab.Ddns -> DdnsScreen(vm, mod)
+            Tab.Billing -> BillingScreen(vm, mod)
             Tab.Account -> AccountScreen(vm, mod)
         }
     }

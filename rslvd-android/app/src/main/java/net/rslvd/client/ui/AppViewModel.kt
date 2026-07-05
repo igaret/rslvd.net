@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import net.rslvd.client.data.Host
 import net.rslvd.client.data.LoginResult
+import net.rslvd.client.data.PlanInfo
+import net.rslvd.client.data.SubscriptionInfo
 import net.rslvd.client.data.Repository
 import net.rslvd.client.data.Tunnel
 import net.rslvd.client.data.User
@@ -25,6 +27,13 @@ data class HostsState(
 data class TunnelsState(
     val loading: Boolean = false,
     val items: List<Tunnel> = emptyList(),
+    val error: String? = null,
+)
+
+data class BillingState(
+    val loading: Boolean = false,
+    val plans: List<PlanInfo> = emptyList(),
+    val subscription: SubscriptionInfo? = null,
     val error: String? = null,
 )
 
@@ -46,6 +55,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _snackbar = MutableStateFlow<String?>(null)
     val snackbar: StateFlow<String?> = _snackbar.asStateFlow()
+
+    private val _billing = MutableStateFlow(BillingState())
+    val billing: StateFlow<BillingState> = _billing.asStateFlow()
 
     private val _ddns = MutableStateFlow(DdnsUiState())
     val ddns: StateFlow<DdnsUiState> = _ddns.asStateFlow()
@@ -162,6 +174,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             repo.deleteTunnel(tunnel.id)
                 .onSuccess { toast("Deleted ${tunnel.name}"); loadTunnels() }
                 .onFailure { toast(it.message ?: "Failed to delete tunnel") }
+        }
+    }
+
+    // ── Billing ──────────────────────────────────────────────────────────────
+    fun loadBilling() {
+        _billing.value = _billing.value.copy(loading = true, error = null)
+        viewModelScope.launch {
+            val plans = repo.plans().getOrElse { handleAuthError(it); emptyList() }
+            repo.subscription()
+                .onSuccess { _billing.value = BillingState(plans = plans, subscription = it) }
+                .onFailure {
+                    handleAuthError(it)
+                    _billing.value = BillingState(plans = plans, error = if (plans.isEmpty()) it.message else null)
+                }
+        }
+    }
+
+    fun cancelSubscription(onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            repo.cancelSubscription()
+                .onSuccess { toast("Subscription will end at your paid-through date"); loadBilling(); refreshUser(); onDone(true) }
+                .onFailure { toast(it.message ?: "Cancellation failed"); onDone(false) }
         }
     }
 

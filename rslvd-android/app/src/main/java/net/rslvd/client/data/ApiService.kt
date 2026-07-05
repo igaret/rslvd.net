@@ -34,4 +34,13 @@ interface ApiService {
 
     @DELETE("tunnels/{id}")
     suspend fun deleteTunnel(@Path("id") id: String): Response<GenericResponse>
+
+    @GET("billing/plans")
+    suspend fun plans(): Response<List<PlanInfo>>
+
+    @GET("billing/subscription")
+    suspend fun subscription(): Response<SubscriptionInfo>
+
+    @POST("billing/cancel")
+    suspend fun cancelSubscription(): Response<GenericResponse>
 }

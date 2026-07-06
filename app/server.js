@@ -42,9 +42,9 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`rslvd.net DDNS server running on port ${PORT}`);
-  require('./db/migrate').run();
+  await require('./db/migrate').run();
   require('./lib/tunnel-proxy').startTunnelProxy();
   require('./lib/billing-renewal').startRenewalJob();
 });

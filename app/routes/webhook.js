@@ -8,6 +8,22 @@ async function userByPayment(paymentId) {
   return rows[0] || null;
 }
 
+// Events worth an admin alert even without a dedicated handler. Everything
+// else (order.*, customer.*, card.created, ...) fires on every normal sale
+// and is only logged.
+const NOTABLE_EVENTS = new Set([
+  'payout.failed',
+  'card.disabled',
+  'card.forgotten',
+  'invoice.scheduled_charge_failed',
+  'dispute.state.changed',
+  'dispute.state.updated',
+  'dispute.evidence.added',
+  'dispute.evidence.deleted',
+  'dispute.evidence.removed',
+  'bank_account.disabled',
+]);
+
 function money(m) {
   return m && m.amount != null ? `$${(Number(m.amount) / 100).toFixed(2)}` : '?';
 }
@@ -125,7 +141,11 @@ router.post('/', async (req, res) => {
       }
 
       default:
-        if (type) notifyAdmin(`Square event: ${type}`, `Unhandled webhook event received (id ${event.event_id || '?'})`);
+        if (type && NOTABLE_EVENTS.has(type)) {
+          notifyAdmin(`Square event: ${type}`, `Event received (id ${event.event_id || '?'}) — check the Square dashboard`);
+        } else if (type) {
+          console.log(`Webhook: ${type} (id ${event.event_id || '?'})`);
+        }
     }
 
     res.json({ received: true });

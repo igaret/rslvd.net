@@ -1,7 +1,7 @@
-const crypto = require('crypto');
 const pool = require('../db/pool');
 const square = require('./square');
 const { PLANS } = require('./plans');
+const payments = require('./payments');
 
 const GRACE_DAYS = 3;
 
@@ -19,25 +19,12 @@ async function renewUser(user) {
     return downgrade(user.id);
   }
   try {
-    const { payment } = await square.client.payments.create({
-      idempotencyKey: crypto.randomUUID(),
-      sourceId: user.square_card_id,
-      customerId: user.square_customer_id,
-      locationId: square.locationId,
-      amountMoney: { amount: BigInt(planInfo.amountCents), currency: 'USD' },
-      note: `rslvd.net ${planInfo.label} plan renewal`,
+    const intent = await payments.createIntent({
+      userId: user.id, plan: user.plan, kind: 'renewal', amountCents: planInfo.amountCents,
+      customerId: user.square_customer_id, cardId: user.square_card_id,
     });
-    if (payment.status !== 'COMPLETED' && payment.status !== 'APPROVED') {
-      throw new Error(`Payment ${payment.status}`);
-    }
-    const base = user.plan_expires_at && new Date(user.plan_expires_at) > new Date()
-      ? new Date(user.plan_expires_at) : new Date();
-    const expires = new Date(base.getTime() + planInfo.periodDays * 86400000);
-    await pool.query(
-      `UPDATE users SET subscription_id = $1, subscription_status = 'active', plan_expires_at = $2, updated_at = NOW()
-       WHERE id = $3`,
-      [payment.id, expires, user.id]
-    );
+    const payment = await payments.executeIntent(intent, `rslvd.net ${planInfo.label} plan renewal`);
+    const expires = await payments.applyIntent(intent, payment);
     console.log(`Billing: renewed ${user.email} (${user.plan}) through ${expires.toISOString()}`);
   } catch (err) {
     console.error(`Billing: renewal charge failed for ${user.email}:`, err.message);
@@ -48,6 +35,9 @@ async function renewUser(user) {
 async function sweep() {
   if (!square.configured) return;
   try {
+    // Recover charges interrupted by a crash/restart before they were applied
+    await payments.reconcilePending();
+
     // Active subscriptions at/past their paid-through date: attempt renewal charge
     const due = await pool.query(
       `SELECT * FROM users WHERE subscription_status = 'active' AND plan != 'free' AND plan_expires_at <= NOW()`
@@ -83,6 +73,8 @@ async function sweep() {
 function startRenewalJob() {
   sweep();
   setInterval(sweep, 6 * 60 * 60 * 1000);
+  // Reconcile interrupted charges more aggressively than the renewal sweep
+  setInterval(() => payments.reconcilePending().catch((e) => console.error('Billing reconcile error:', e)), 10 * 60 * 1000);
 }
 
 module.exports = { startRenewalJob, sweep };

@@ -219,6 +219,21 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
+
+CREATE TABLE IF NOT EXISTS payment_intents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  plan VARCHAR(50) NOT NULL,
+  kind VARCHAR(20) NOT NULL DEFAULT 'subscribe',
+  amount_cents INTEGER NOT NULL,
+  square_customer_id VARCHAR(255),
+  square_card_id VARCHAR(255),
+  square_payment_id VARCHAR(255),
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payment_intents_status ON payment_intents(status);
 `;
 
 async function run() {

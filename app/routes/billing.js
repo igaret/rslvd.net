@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const square = require('../lib/square');
 const { PLANS } = require('../lib/plans');
 const { requireAuth } = require('../middleware/auth');
+const payments = require('../lib/payments');
 
 router.get('/plans', (req, res) => {
   res.json(Object.entries(PLANS).map(([key, val]) => ({
@@ -54,21 +55,6 @@ async function storeCard(user, customerId, sourceId) {
   return card;
 }
 
-async function chargeCard(customerId, cardId, planKey, planInfo, note) {
-  const { payment } = await square.client.payments.create({
-    idempotencyKey: crypto.randomUUID(),
-    sourceId: cardId,
-    customerId,
-    locationId: square.locationId,
-    amountMoney: { amount: BigInt(planInfo.amountCents), currency: 'USD' },
-    note: note || `rslvd.net ${planInfo.label} plan (${planKey})`,
-  });
-  if (payment.status !== 'COMPLETED' && payment.status !== 'APPROVED') {
-    throw new Error(`Payment ${payment.status}`);
-  }
-  return payment;
-}
-
 router.post('/subscribe', requireAuth, requireGateway, async (req, res) => {
   try {
     const { plan, sourceId } = req.body;
@@ -83,15 +69,15 @@ router.post('/subscribe', requireAuth, requireGateway, async (req, res) => {
 
     const customerId = await ensureCustomer(user);
     const card = await storeCard(user, customerId, sourceId);
-    const payment = await chargeCard(customerId, card.id, plan, planInfo);
 
-    const expires = new Date(Date.now() + planInfo.periodDays * 86400000);
-    await pool.query(
-      `UPDATE users SET subscription_id = $1, subscription_status = 'active',
-       plan = $2, max_hosts = $3, max_tunnels = $4, plan_expires_at = $5, updated_at = NOW()
-       WHERE id = $6`,
-      [payment.id, plan, planInfo.maxHosts, planInfo.maxTunnels, expires, user.id]
-    );
+    // Intent row + Square idempotency key make the charge crash-safe: if the
+    // process dies after the charge, reconciliation applies the paid plan.
+    const intent = await payments.createIntent({
+      userId: user.id, plan, kind: 'subscribe', amountCents: planInfo.amountCents,
+      customerId, cardId: card.id,
+    });
+    const payment = await payments.executeIntent(intent, `rslvd.net ${planInfo.label} plan (${plan})`);
+    const expires = await payments.applyIntent(intent, payment);
 
     res.json({ success: true, subscription: { id: payment.id, status: 'active', plan, paidThroughDate: expires } });
   } catch (err) {

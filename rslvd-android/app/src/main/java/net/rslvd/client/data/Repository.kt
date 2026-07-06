@@ -67,6 +67,12 @@ class Repository private constructor(
 
     suspend fun deleteTunnel(id: String): Result<Unit> = callUnit { api.deleteTunnel(id) }
 
+    suspend fun plans(): Result<List<PlanInfo>> = call { api.plans() }
+
+    suspend fun subscription(): Result<SubscriptionInfo> = call { api.subscription() }
+
+    suspend fun cancelSubscription(): Result<Unit> = callUnit { api.cancelSubscription() }
+
     fun logout() = tokenStore.clear()
 
     fun isLoggedIn() = tokenStore.isLoggedIn()

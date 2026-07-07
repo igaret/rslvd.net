@@ -195,7 +195,7 @@ router.get('/config', requireSiteOwner, async (req, res) => {
   res.json({
     base_domain: process.env.BASE_DOMAIN,
     app_url: process.env.APP_URL,
-    server_ip: process.env.SERVER_IP || '13.220.239.207',
+    server_ip: process.env.SERVER_IP || '129.146.61.187',
     node_env: process.env.NODE_ENV,
     square_configured: !!process.env.SQUARE_ACCESS_TOKEN,
     ionos_configured: !!process.env.IONOS_API_KEY,

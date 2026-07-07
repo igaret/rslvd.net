@@ -11,7 +11,7 @@ rslvd.net is a no-build React SPA (`app/public/app2.js`) using raw `React.create
 
 ## Devin Secrets Needed
 
-- `SSH_KEY` — SSH key for production access (`~/.ssh/surf.pem`, user `admin@13.220.239.207`)
+- `SSH_KEY` — SSH key for production access (`~/.ssh/oracle.key`, user `ubuntu@129.146.61.187`)
 - `SMTP_*` — SMTP credentials for email verification testing (in production env vars)
 
 ## Quick Start — Local Static Testing
@@ -37,7 +37,7 @@ For full end-to-end tests, use `https://rslvd.net` directly. The site is deploye
 
 ### SSH Access
 ```bash
-ssh -i ~/.ssh/surf.pem -o StrictHostKeyChecking=no admin@13.220.239.207
+ssh -i ~/.ssh/oracle.key -o StrictHostKeyChecking=no ubuntu@129.146.61.187
 ```
 
 ### Service Management
@@ -95,7 +95,7 @@ sudo -u postgres psql -d rslvd -c "SELECT ..."
 
 Always delete test users after testing:
 ```bash
-ssh -i ~/.ssh/surf.pem admin@13.220.239.207 \
+ssh -i ~/.ssh/oracle.key ubuntu@129.146.61.187 \
   "sudo -u postgres psql -d rslvd -c \"DELETE FROM users WHERE email = 'test@example.com';\""
 ```
 

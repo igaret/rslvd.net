@@ -102,7 +102,7 @@ router.post('/', async (req, res) => {
       );
 
       try {
-        const serverIP = process.env.SERVER_IP || '13.220.239.207';
+        const serverIP = process.env.SERVER_IP || '129.146.61.187';
         const r = await ionos.upsertRecord(fqdn, 'A', serverIP);
         await pool.query('UPDATE tunnels SET ionos_record_id=$1, status=$2 WHERE id=$3',
           [r.recordId, 'active', result.rows[0].id]);
@@ -163,7 +163,7 @@ router.post('/', async (req, res) => {
     );
 
     try {
-      const serverIP = process.env.SERVER_IP || '13.220.239.207';
+      const serverIP = process.env.SERVER_IP || '129.146.61.187';
       const r = await ionos.upsertRecord(fqdn, 'A', serverIP);
       await pool.query('UPDATE tunnels SET ionos_record_id=$1, status=$2 WHERE id=$3',
         [r.recordId, 'active', result.rows[0].id]);

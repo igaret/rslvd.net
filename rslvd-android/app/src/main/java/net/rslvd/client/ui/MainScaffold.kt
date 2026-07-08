@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -31,6 +32,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Tunnels("Tunnels", Icons.Filled.SwapHoriz),
     Ddns("DDNS", Icons.Filled.Sync),
     Billing("Billing", Icons.Filled.CreditCard),
+    Terminal("Shell", Icons.Filled.Terminal),
     Account("Account", Icons.Filled.AccountCircle),
 }
 
@@ -70,6 +72,7 @@ fun MainScaffold(vm: AppViewModel) {
             Tab.Tunnels -> TunnelsScreen(vm, mod)
             Tab.Ddns -> DdnsScreen(vm, mod)
             Tab.Billing -> BillingScreen(vm, mod)
+            Tab.Terminal -> TerminalScreen(mod)
             Tab.Account -> AccountScreen(vm, mod)
         }
     }

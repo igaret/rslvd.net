@@ -17,6 +17,7 @@ import net.rslvd.client.data.User
 import net.rslvd.client.ddns.DdnsConfig
 import net.rslvd.client.ddns.DdnsScheduler
 import net.rslvd.client.ddns.DdnsTarget
+import net.rslvd.client.tunnel.TunnelService
 
 data class HostsState(
     val loading: Boolean = false,
@@ -200,6 +201,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { toast("Deleted ${tunnel.name}"); loadTunnels() }
                 .onFailure { toast(it.message ?: "Failed to delete tunnel") }
         }
+    }
+
+    fun connectTunnel(tunnel: Tunnel) {
+        val token = tunnel.token
+        val port = tunnel.targetPort
+        if (token.isNullOrBlank() || port == null) {
+            toast("This tunnel has no connect token")
+            return
+        }
+        TunnelService.start(
+            getApplication(),
+            id = tunnel.id,
+            name = tunnel.fqdn ?: tunnel.name,
+            token = token,
+            protocol = tunnel.protocol ?: "tcp",
+            targetHost = tunnel.targetHost ?: "localhost",
+            targetPort = port,
+        )
+    }
+
+    fun disconnectTunnel(tunnel: Tunnel) {
+        TunnelService.stop(getApplication(), tunnel.id)
     }
 
     // ── Billing ──────────────────────────────────────────────────────────────

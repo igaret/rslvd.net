@@ -6,6 +6,8 @@ import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
+import okhttp3.ResponseBody
 
 interface ApiService {
     @POST("auth/login")
@@ -19,6 +21,9 @@ interface ApiService {
 
     @GET("hosts")
     suspend fun hosts(): Response<List<Host>>
+
+    @GET("update")
+    suspend fun updateHostIp(@Query("key") key: String, @Query("ip") ip: String): Response<ResponseBody>
 
     @POST("hosts")
     suspend fun createHost(@Body body: CreateHostRequest): Response<Host>

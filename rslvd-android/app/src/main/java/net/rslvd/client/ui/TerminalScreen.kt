@@ -114,7 +114,9 @@ class ShellSession(context: Context) {
             return
         }
         append("$ $cmd\n")
-        val alive = process?.isAlive == true
+        val alive = process?.let { p ->
+            try { p.exitValue(); false } catch (e: IllegalThreadStateException) { true }
+        } ?: false
         if (!alive) {
             append("[restarting shell]\n")
             start()

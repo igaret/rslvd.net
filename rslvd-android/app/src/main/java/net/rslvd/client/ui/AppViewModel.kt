@@ -151,6 +151,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setHostIp(host: Host, ip: String, onDone: (Boolean) -> Unit) {
+        val normalized = ip.trim()
+        if (!isValidIpv4(normalized)) {
+            toast("Enter a valid IPv4 address")
+            onDone(false)
+            return
+        }
+        val key = host.updateKey
+        if (key.isNullOrBlank()) {
+            toast("This host has no update key")
+            onDone(false)
+            return
+        }
+        viewModelScope.launch {
+            repo.updateHostIp(key, normalized)
+                .onSuccess { toast("Updated ${host.fqdn} to $normalized"); loadHosts(); onDone(true) }
+                .onFailure { toast(it.message ?: "Failed to update host IP"); onDone(false) }
+        }
+    }
+
+    private fun isValidIpv4(value: String): Boolean {
+        val parts = value.split('.')
+        return parts.size == 4 && parts.all { it.isNotEmpty() && it.toIntOrNull()?.let { octet -> octet in 0..255 } == true }
+    }
+
     // ── Tunnels ──────────────────────────────────────────────────────────────
     fun loadTunnels() {
         _tunnels.value = _tunnels.value.copy(loading = true, error = null)

@@ -88,7 +88,7 @@ router.post('/login', async (req, res) => {
     if (user.totp_enabled && user.totp_secret) {
       const { totp_code } = req.body;
       if (!totp_code) return res.status(200).json({ requireTotp: true });
-      const ok = speakeasy.totp.verify({ secret: user.totp_secret, encoding: 'base32', token: totp_code, window: 1 });
+      const ok = speakeasy.totp.verify({ secret: user.totp_secret, encoding: 'base32', token: totp_code, window: 2 });
       if (!ok) return res.status(401).json({ error: 'Invalid authenticator code' });
     }
 
@@ -181,7 +181,7 @@ router.post('/2fa/verify', require('../middleware/auth').requireAuth, async (req
     const row = await pool.query('SELECT totp_pending_secret FROM users WHERE id = $1', [req.user.id]);
     const pendingSecret = row.rows[0]?.totp_pending_secret;
     if (!pendingSecret) return res.status(400).json({ error: 'No pending 2FA setup. Start setup first.' });
-    const ok = speakeasy.totp.verify({ secret: pendingSecret, encoding: 'base32', token: code, window: 1 });
+    const ok = speakeasy.totp.verify({ secret: pendingSecret, encoding: 'base32', token: code, window: 2 });
     if (!ok) return res.status(401).json({ error: 'Invalid code — check your authenticator app clock' });
     await pool.query(
       'UPDATE users SET totp_secret = $1, totp_enabled = TRUE, totp_pending_secret = NULL WHERE id = $2',

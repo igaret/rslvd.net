@@ -998,13 +998,15 @@ function AddHostModal({ onClose, onCreated, user, existingHosts }) {
 }
 
 // ── Host Card ────────────────────────────────────────────────────────────────
-function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, isNested }) {
+function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, onIpUpdated, isNested }) {
   const [showKey, setShowKey] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [detectedIp, setDetectedIp] = useState(null);
   const [detecting, setDetecting] = useState(false);
   const [manualIp, setManualIp] = useState(['', '', '', '']);
   const [showManualIp, setShowManualIp] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState('');
   const [toggling, setToggling] = useState(false);
 
   const useHttps = h.force_https !== false;
@@ -1062,6 +1064,26 @@ function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, isNested }) {
     }
   };
 
+  const saveManualIp = async () => {
+    if (!manualIpString || !h.update_key) return;
+    setSaving(true);
+    setSaveMessage('');
+    try {
+      const res = await fetch(`/api/update?key=${encodeURIComponent(h.update_key)}&ip=${encodeURIComponent(manualIpString)}`);
+      const text = (await res.text()).trim();
+      if (!res.ok || (!text.startsWith('good') && !text.startsWith('nochg'))) {
+        throw new Error(text || 'Failed to update IP');
+      }
+      if (onIpUpdated) onIpUpdated(h.id, manualIpString);
+      setSaveMessage('Saved');
+      setTimeout(() => setSaveMessage(''), 2500);
+    } catch (err) {
+      alert(`Failed to save IP: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return React.createElement('div', { className: 'card', style: { marginBottom: 8, marginLeft: isNested ? 24 : 0, borderLeft: isNested ? '3px solid var(--accent)' : undefined } },
     React.createElement('div', { className: 'flex-between', style: { marginBottom: 12 } },
       React.createElement('div', null,
@@ -1111,7 +1133,13 @@ function HostCard({ host: h, onDelete, onRegenKey, onHttpsToggle, isNested }) {
             style: { width: 44, textAlign: 'center', padding: '6px 4px', fontSize: 14, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text)' }
           }),
           idx < 3 && React.createElement('span', { style: { color: 'var(--text2)', fontWeight: 'bold' } }, '.')
-        ))
+        )),
+        React.createElement('button', {
+          className: 'btn btn-primary btn-sm',
+          onClick: saveManualIp,
+          disabled: saving || !manualIpString || !h.update_key
+        }, saving ? React.createElement(Spinner) : 'Save'),
+        saveMessage && React.createElement('span', { style: { fontSize: 12, color: 'var(--accent2)' } }, saveMessage)
       ),
       showKey && React.createElement('code', { style: { fontSize: 12, color: 'var(--accent2)', wordBreak: 'break-all', background: 'var(--bg3)', padding: '8px 12px', borderRadius: 6 } }, h.update_key)
     )
@@ -1156,6 +1184,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const onHostDeleted = id => setHosts(x => x.filter(h => h.id !== id));
   const onRegenKey = (id, key) => setHosts(x => x.map(h => h.id === id ? { ...h, update_key: key } : h));
   const onHostHttpsToggle = (id, val) => setHosts(x => x.map(h => h.id === id ? { ...h, force_https: val } : h));
+  const onHostIpUpdated = (id, ip) => setHosts(x => x.map(h => h.id === id ? { ...h, ip_address: ip, last_updated: new Date().toISOString() } : h));
   const onTunnelCreated = t => { setTunnels(x => [t, ...x]); setShowAddTunnel(false); };
   const onTunnelDeleted = id => setTunnels(x => x.filter(t => t.id !== id));
   const onTunnelHttpsToggle = (id, val) => setTunnels(x => x.map(t => t.id === id ? { ...t, force_https: val } : t));
@@ -1338,9 +1367,9 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
             const topLevel = hosts.filter(h => !h.parent_host_id);
             const children = hosts.filter(h => !!h.parent_host_id);
             return topLevel.flatMap(h => [
-              React.createElement(HostCard, { key: h.id, host: h, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, isNested: false }),
+              React.createElement(HostCard, { key: h.id, host: h, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, onIpUpdated: onHostIpUpdated, isNested: false }),
               ...children.filter(c => c.parent_host_id === h.id).map(c =>
-                React.createElement(HostCard, { key: c.id, host: c, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, isNested: true })
+                React.createElement(HostCard, { key: c.id, host: c, onDelete: onHostDeleted, onRegenKey, onHttpsToggle: onHostHttpsToggle, onIpUpdated: onHostIpUpdated, isNested: true })
               )
             ]);
           })(),

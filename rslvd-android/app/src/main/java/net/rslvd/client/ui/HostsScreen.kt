@@ -27,6 +27,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,6 +48,7 @@ fun HostsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val state by vm.hosts.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<Host?>(null) }
+    var setIpHost by remember { mutableStateOf<Host?>(null) }
 
     LaunchedEffect(Unit) { if (state.items.isEmpty()) vm.loadHosts() }
 
@@ -79,6 +81,7 @@ fun HostsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                             onCopyKey = { host.updateKey?.let { vm.copyText("update key", it) } },
                             onCopyFqdn = { vm.copyText("hostname", host.fqdn) },
                             onAddDdns = { vm.addRslvdTarget(host) },
+                            onSetIp = { setIpHost = host },
                             onDelete = { confirmDelete = host },
                         )
                     }
@@ -103,6 +106,13 @@ fun HostsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
         )
     }
+
+    setIpHost?.let { host ->
+        SetHostIpDialog(
+            onDismiss = { setIpHost = null },
+            onConfirm = { ip -> vm.setHostIp(host, ip) { ok -> if (ok) setIpHost = null } },
+        )
+    }
 }
 
 @Composable
@@ -111,6 +121,7 @@ private fun HostCard(
     onCopyKey: () -> Unit,
     onCopyFqdn: () -> Unit,
     onAddDdns: () -> Unit,
+    onSetIp: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(Modifier.fillMaxWidth()) {
@@ -132,6 +143,9 @@ private fun HostCard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onAddDdns) { Text("Add to DDNS") }
                 if (!host.updateKey.isNullOrBlank()) {
+                    OutlinedButton(onClick = onSetIp) { Text("Set IP") }
+                }
+                if (!host.updateKey.isNullOrBlank()) {
                     OutlinedButton(onClick = onCopyKey) {
                         Icon(Icons.Filled.ContentCopy, null, Modifier.height(16.dp)); Spacer(Modifier.height(0.dp)); Text("Key")
                     }
@@ -139,6 +153,34 @@ private fun HostCard(
             }
         }
     }
+}
+
+@Composable
+private fun SetHostIpDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var ip by remember { mutableStateOf("") }
+    val valid = ip.split('.').let { parts ->
+        parts.size == 4 && parts.all { it.isNotEmpty() && it.toIntOrNull()?.let { octet -> octet in 0..255 } == true }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set IP address") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = ip,
+                    onValueChange = { ip = it.filter { c -> c.isDigit() || c == '.' }.take(15) },
+                    label = { Text("IPv4 address") },
+                    placeholder = { Text("192.0.2.1") },
+                    singleLine = true,
+                )
+                if (ip.isNotBlank() && !valid) {
+                    Text("Enter four octets between 0 and 255", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onConfirm(ip.trim()) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

@@ -55,6 +55,20 @@ class Repository private constructor(
 
     suspend fun hosts(): Result<List<Host>> = call { api.hosts() }
 
+    suspend fun updateHostIp(key: String, ip: String): Result<String> {
+        return try {
+            val resp = api.updateHostIp(key, ip)
+            val body = resp.body()?.string()?.trim().orEmpty()
+            if (resp.isSuccessful && (body.startsWith("good") || body.startsWith("nochg"))) {
+                Result.success(body)
+            } else {
+                Result.failure(ApiException(body.ifBlank { errorMessage(resp, "Failed to update host IP") }, resp.code()))
+            }
+        } catch (e: Exception) {
+            Result.failure(ApiException(networkMessage(e), -1))
+        }
+    }
+
     suspend fun createHost(hostname: String, forceHttps: Boolean): Result<Host> =
         call { api.createHost(CreateHostRequest(hostname.trim().lowercase(), forceHttps)) }
 

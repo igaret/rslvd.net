@@ -28,6 +28,12 @@ function useRoute() {
     return () => window.removeEventListener('popstate', h);
   }, []);
   const navigate = (to) => { window.history.pushState({}, '', to); setPath(to); };
+  useEffect(() => {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    fetch('/api/track/pageview', { method: 'POST', headers, body: JSON.stringify({ path }) }).catch(() => {});
+  }, [path]);
   return { path, navigate };
 }
 

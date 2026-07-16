@@ -1,6 +1,29 @@
 const pool = require('../db/pool');
 
+// Site-owner activity is excluded from the log by default (set
+// ACTIVITY_LOG_SITE_OWNER=true to include it). Owner ids are cached briefly
+// to avoid a lookup on every logged event.
+let siteOwnerIds = null;
+let siteOwnerCacheAt = 0;
+const SITE_OWNER_CACHE_MS = 60_000;
+
+async function isSiteOwner(userId) {
+  if (!userId) return false;
+  const now = Date.now();
+  if (!siteOwnerIds || now - siteOwnerCacheAt > SITE_OWNER_CACHE_MS) {
+    const r = await pool.query('SELECT id FROM users WHERE is_site_owner = TRUE');
+    siteOwnerIds = new Set(r.rows.map((row) => row.id));
+    siteOwnerCacheAt = now;
+  }
+  return siteOwnerIds.has(userId);
+}
+
 async function log(event, { userId = null, detail = null, req = null } = {}) {
+  try {
+    if (process.env.ACTIVITY_LOG_SITE_OWNER !== 'true' && (await isSiteOwner(userId))) return;
+  } catch (e) {
+    console.error('activity owner check error:', e.message);
+  }
   try {
     const ip = req
       ? (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null)

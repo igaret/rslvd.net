@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
 const tunnelCert = require('../lib/tunnel-cert');
+const { activeBonus } = require('../lib/plans');
 
 const PORT_MIN = 20000;
 const PORT_MAX = 29999;
@@ -84,7 +85,7 @@ router.post('/', async (req, res) => {
       const countResult = await pool.query(
         'SELECT COUNT(*) FROM tunnels WHERE user_id = $1 AND active = TRUE', [user.id]
       );
-      const limit = user.max_tunnels || 1;
+      const limit = (user.max_tunnels || 1) + activeBonus(user).tunnels;
       if (parseInt(countResult.rows[0].count) >= limit) {
         return res.status(403).json({ error: `Tunnel limit reached (${limit}). Upgrade to add more.` });
       }
@@ -125,7 +126,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Invalid name. Lowercase letters, numbers, hyphens only.' });
     }
 
-    const limit = user.max_tunnels || 1;
+    const limit = (user.max_tunnels || 1) + activeBonus(user).tunnels;
     if (user.plan !== 'free' && user.plan_expires_at && new Date(user.plan_expires_at) < new Date()) {
       return res.status(403).json({ error: 'Subscription expired' });
     }

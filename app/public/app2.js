@@ -1168,6 +1168,8 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
   const [cancelLoading, setCancelLoading] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [showUpdatePM, setShowUpdatePM] = useState(false);
+  const [showDonate, setShowDonate] = useState(false);
+  const [donateAmount, setDonateAmount] = useState('5.00');
   const sqCardRef = useRef(null);
   const sqPaymentsRef = useRef(null);
 
@@ -1250,6 +1252,12 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
     return () => teardownCard();
   }, [showUpdatePM]);
 
+  useEffect(() => {
+    if (showDonate) initCard('sq-card-donate');
+    else teardownCard();
+    return () => teardownCard();
+  }, [showDonate]);
+
   const tokenizeCard = async () => {
     const result = await sqCardRef.current.tokenize();
     if (result.status !== 'OK') {
@@ -1270,6 +1278,23 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
       teardownCard();
       setTimeout(() => refreshUser(), 1500);
     } catch (e) { alert(e.message || 'Payment failed'); }
+    finally { setPaymentLoading(false); }
+  };
+
+  const handleDonate = async () => {
+    if (!sqCardRef.current) return;
+    const cents = Math.round(parseFloat(donateAmount) * 100);
+    if (!Number.isFinite(cents) || cents < 50) { alert('Minimum donation is $0.50'); return; }
+    if (cents > 20000) { alert('Maximum donation is $200'); return; }
+    setPaymentLoading(true);
+    try {
+      const sourceId = await tokenizeCard();
+      const r = await API.post('/billing/donate', { amountCents: cents, sourceId });
+      setMsg(`Thank you for supporting rslvd! You now have +${r.bonusHosts} bonus hostname${r.bonusHosts === 1 ? '' : 's'} and +${r.bonusTunnels} bonus tunnel${r.bonusTunnels === 1 ? '' : 's'} until ${new Date(r.bonusExpiresAt).toLocaleDateString()}.`);
+      setShowDonate(false);
+      teardownCard();
+      setTimeout(() => refreshUser(), 1500);
+    } catch (e) { alert(e.message || 'Donation failed'); }
     finally { setPaymentLoading(false); }
   };
 
@@ -1322,6 +1347,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
         React.createElement('span', { className: `badge badge-${statusColor[user.status] || 'gray'}` },
           planLabel[user.plan] || user.plan
         ),
+        user.supporter && React.createElement('span', { className: 'badge badge-purple' }, '💜 Supporter'),
         user.role === 'site_owner' && React.createElement('span', { className: 'badge badge-yellow' }, '★ Site Owner'),
         user.role === 'admin' && React.createElement('span', { className: 'badge badge-purple' }, '⚙ Admin'),
       )
@@ -1423,6 +1449,36 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
 
     // Billing tab
     tab === 'billing' && React.createElement('div', null,
+      React.createElement('div', { className: 'card mb-4', style: { borderColor: 'var(--accent)' } },
+        React.createElement('div', { className: 'flex-between', style: { flexWrap: 'wrap', gap: 12 } },
+          React.createElement('div', { style: { display: 'flex', gap: 12, alignItems: 'flex-start' } },
+            React.createElement('div', { style: { fontSize: 24 } }, '💜'),
+            React.createElement('div', null,
+              React.createElement('h3', { style: { marginBottom: 4 } }, 'Support rslvd'),
+              React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, 'Donate any amount — every 50¢ gives you +1 bonus hostname and +1 bonus tunnel for 30 days, plus a Supporter badge.'),
+              user.bonusExpiresAt && React.createElement('p', { style: { color: 'var(--accent2)', fontSize: 13, marginTop: 4, fontWeight: 600 } }, `Active bonus: +${user.bonusHosts} hostnames · +${user.bonusTunnels} tunnels until ${new Date(user.bonusExpiresAt).toLocaleDateString()}`)
+            )
+          ),
+          React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setShowDonate(!showDonate) }, showDonate ? 'Cancel' : 'Donate')
+        ),
+        showDonate && React.createElement('div', { style: { marginTop: 16 } },
+          React.createElement('label', { style: { fontSize: 13, color: 'var(--text2)', display: 'block', marginBottom: 6 } }, 'Amount (USD, min $0.50)'),
+          React.createElement('input', {
+            className: 'input', type: 'number', min: '0.50', max: '200', step: '0.50',
+            value: donateAmount, onChange: e => setDonateAmount(e.target.value),
+            style: { maxWidth: 160, marginBottom: 12 }
+          }),
+          (() => {
+            const cents = Math.round(parseFloat(donateAmount) * 100);
+            const slots = Number.isFinite(cents) && cents >= 50 ? Math.min(Math.floor(cents / 50), 100) : 0;
+            return slots > 0 && React.createElement('p', { style: { color: 'var(--text2)', fontSize: 13, marginBottom: 12 } }, `You'll get +${slots} bonus hostname${slots === 1 ? '' : 's'} and +${slots} bonus tunnel${slots === 1 ? '' : 's'} for 30 days`);
+          })(),
+          React.createElement('div', { id: 'sq-card-donate' }),
+          React.createElement('button', { className: 'btn btn-primary', style: { marginTop: 12 }, onClick: handleDonate, disabled: paymentLoading },
+            paymentLoading ? React.createElement(Spinner) : 'Donate'
+          )
+        )
+      ),
       isPaidActive
         ? React.createElement('div', null,
           React.createElement('div', { className: 'card mb-4' },

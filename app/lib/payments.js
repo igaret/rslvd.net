@@ -1,6 +1,6 @@
 const pool = require('../db/pool');
 const square = require('./square');
-const { PLANS } = require('./plans');
+const { PLANS, DONATION } = require('./plans');
 
 // Payment intents make charges crash-safe. An intent row is written before the
 // Square charge, and the intent id doubles as the Square idempotency key — so
@@ -44,6 +44,36 @@ async function executeIntent(intent, note) {
   }
   await setIntentStatus(intent.id, 'charged', payment.id);
   return payment;
+}
+
+/** Apply a paid donation intent: grant bonus slots and record the total. */
+async function applyDonation(intent, payment) {
+  const slots = Math.min(
+    Math.floor(intent.amount_cents / DONATION.centsPerSlot),
+    DONATION.maxBonusSlots
+  );
+  const { rows } = await pool.query(
+    'SELECT bonus_hosts, bonus_tunnels, bonus_expires_at FROM users WHERE id = $1',
+    [intent.user_id]
+  );
+  if (!rows.length) throw new Error('User no longer exists');
+
+  const u = rows[0];
+  const now = new Date();
+  const bonusActive = u.bonus_expires_at && new Date(u.bonus_expires_at) > now;
+  const base = bonusActive ? new Date(u.bonus_expires_at) : now;
+  const expires = new Date(base.getTime() + DONATION.periodDays * 86400000);
+  const hosts = Math.min((bonusActive ? u.bonus_hosts || 0 : 0) + slots, DONATION.maxBonusSlots);
+  const tunnels = Math.min((bonusActive ? u.bonus_tunnels || 0 : 0) + slots, DONATION.maxBonusSlots);
+
+  await pool.query(
+    `UPDATE users SET bonus_hosts = $1, bonus_tunnels = $2, bonus_expires_at = $3,
+     donated_total_cents = COALESCE(donated_total_cents, 0) + $4, updated_at = NOW()
+     WHERE id = $5`,
+    [hosts, tunnels, expires, intent.amount_cents, intent.user_id]
+  );
+  await setIntentStatus(intent.id, 'applied', payment.id);
+  return { hosts, tunnels, expires };
 }
 
 /** Apply a paid intent to the user's account and mark it applied. */
@@ -92,6 +122,12 @@ async function reconcilePending() {
         await setIntentStatus(intent.id, 'abandoned');
         continue;
       }
+      if (intent.kind === 'donation') {
+        const payment = await executeIntent(intent, 'rslvd.net donation (reconciled)');
+        const bonus = await applyDonation(intent, payment);
+        console.log(`Billing: reconciled donation intent ${intent.id} — bonus applied through ${bonus.expires.toISOString()}`);
+        continue;
+      }
       const planInfo = PLANS[intent.plan];
       const payment = await executeIntent(intent, `rslvd.net ${planInfo ? planInfo.label : intent.plan} plan (reconciled)`);
       const expires = await applyIntent(intent, payment);
@@ -103,4 +139,4 @@ async function reconcilePending() {
   }
 }
 
-module.exports = { createIntent, executeIntent, applyIntent, reconcilePending, setIntentStatus };
+module.exports = { createIntent, executeIntent, applyIntent, applyDonation, reconcilePending, setIntentStatus };

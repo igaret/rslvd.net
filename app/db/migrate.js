@@ -234,6 +234,11 @@ CREATE TABLE IF NOT EXISTS payment_intents (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_payment_intents_status ON payment_intents(status);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_hosts INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_tunnels INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS donated_total_cents INTEGER DEFAULT 0;
 `;
 
 async function run() {

@@ -6,4 +6,24 @@ const PLANS = {
   annual:      { label: 'Annual',    amount: '$8.99/yr',  amountCents: 899, periodDays: 365, maxHosts: 999999, maxTunnels: 999999 },
 };
 
-module.exports = { PLANS };
+// Pay-what-you-want donations. Every DONATION.centsPerSlot grants +1 bonus
+// hostname slot and +1 bonus tunnel slot for DONATION.periodDays.
+const DONATION = {
+  minCents: 50,
+  maxCents: 20000,
+  centsPerSlot: 50,
+  periodDays: 30,
+  maxBonusSlots: 100,
+};
+
+/** Currently-active donation bonus slots for a user row (0 when expired). */
+function activeBonus(user) {
+  const active = user && user.bonus_expires_at && new Date(user.bonus_expires_at) > new Date();
+  return {
+    hosts: active ? (user.bonus_hosts || 0) : 0,
+    tunnels: active ? (user.bonus_tunnels || 0) : 0,
+    expiresAt: active ? user.bonus_expires_at : null,
+  };
+}
+
+module.exports = { PLANS, DONATION, activeBonus };

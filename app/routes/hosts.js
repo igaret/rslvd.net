@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
 const tunnelCert = require('../lib/tunnel-cert');
+const { activeBonus } = require('../lib/plans');
 
 const PLAN_LIMITS = {
   free: 2,
@@ -75,7 +76,7 @@ router.post('/', async (req, res) => {
         return res.status(403).json({ error: 'Subscription expired' });
       }
       const countResult = await pool.query('SELECT COUNT(*) FROM hosts WHERE user_id = $1 AND active = TRUE', [user.id]);
-      const limit = user.max_hosts || PLAN_LIMITS[user.plan] || 0;
+      const limit = (user.max_hosts || PLAN_LIMITS[user.plan] || 0) + activeBonus(user).hosts;
       if (parseInt(countResult.rows[0].count) >= limit) {
         return res.status(403).json({ error: `Host limit reached (${limit}). Upgrade to add more.` });
       }
@@ -106,7 +107,7 @@ router.post('/', async (req, res) => {
     }
 
     // Check subscription limit
-    const limit = user.max_hosts || PLAN_LIMITS[user.plan] || 0;
+    const limit = (user.max_hosts || PLAN_LIMITS[user.plan] || 0) + activeBonus(user).hosts;
     if (limit === 0) return res.status(403).json({ error: 'Upgrade your plan to create more hosts' });
 
     // Check paid plan expiry (free tier never expires)

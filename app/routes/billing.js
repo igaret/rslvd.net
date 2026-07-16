@@ -2,9 +2,10 @@ const crypto = require('crypto');
 const router = require('express').Router();
 const pool = require('../db/pool');
 const square = require('../lib/square');
-const { PLANS } = require('../lib/plans');
+const { PLANS, DONATION } = require('../lib/plans');
 const { requireAuth } = require('../middleware/auth');
 const payments = require('../lib/payments');
+const activity = require('../lib/activity');
 
 router.get('/plans', (req, res) => {
   res.json(Object.entries(PLANS).map(([key, val]) => ({
@@ -83,6 +84,41 @@ router.post('/subscribe', requireAuth, requireGateway, async (req, res) => {
   } catch (err) {
     console.error('Subscribe error:', err);
     res.status(400).json({ error: squareErrorMessage(err, 'Subscription failed') });
+  }
+});
+
+// Pay-what-you-want donation: every 50¢ grants +1 bonus hostname and +1 bonus
+// tunnel slot for 30 days (stacks with any plan, extends an active bonus).
+router.post('/donate', requireAuth, requireGateway, async (req, res) => {
+  try {
+    const { amountCents, sourceId } = req.body;
+    const cents = Math.floor(Number(amountCents));
+    if (!Number.isFinite(cents) || cents < DONATION.minCents || cents > DONATION.maxCents) {
+      return res.status(400).json({ error: `Donation must be between $${(DONATION.minCents / 100).toFixed(2)} and $${(DONATION.maxCents / 100).toFixed(2)}` });
+    }
+    if (!sourceId) return res.status(400).json({ error: 'Payment method required' });
+
+    const user = req.user;
+    const customerId = await ensureCustomer(user);
+    const card = await storeCard(user, customerId, sourceId);
+
+    const intent = await payments.createIntent({
+      userId: user.id, plan: 'donation', kind: 'donation', amountCents: cents,
+      customerId, cardId: card.id,
+    });
+    const payment = await payments.executeIntent(intent, 'rslvd.net donation');
+    const bonus = await payments.applyDonation(intent, payment);
+
+    activity.log('user.donation', { userId: user.id, detail: `$${(cents / 100).toFixed(2)}`, req });
+    res.json({
+      success: true,
+      bonusHosts: bonus.hosts,
+      bonusTunnels: bonus.tunnels,
+      bonusExpiresAt: bonus.expires,
+    });
+  } catch (err) {
+    console.error('Donation error:', err);
+    res.status(400).json({ error: squareErrorMessage(err, 'Donation failed') });
   }
 });
 

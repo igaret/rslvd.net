@@ -7,6 +7,7 @@ const speakeasy = require('speakeasy');
 const pool = require('../db/pool');
 const activity = require('../lib/activity');
 const { sendMail } = require('../lib/mailer');
+const { activeBonus } = require('../lib/plans');
 
 const CURRENT_LEGAL_VERSION = '2026-05-31';
 
@@ -123,13 +124,18 @@ router.post('/login', async (req, res) => {
 router.get('/me', require('../middleware/auth').requireAuth, async (req, res) => {
   try {
     const u = req.user;
+    const bonus = activeBonus(u);
     res.json({
       id: u.id,
       email: u.email,
       displayName: u.display_name,
       plan: u.plan,
-      maxHosts: u.max_hosts,
-      maxTunnels: u.max_tunnels,
+      maxHosts: (u.max_hosts || 0) + bonus.hosts,
+      maxTunnels: (u.max_tunnels || 0) + bonus.tunnels,
+      bonusHosts: bonus.hosts,
+      bonusTunnels: bonus.tunnels,
+      bonusExpiresAt: bonus.expiresAt,
+      supporter: (u.donated_total_cents || 0) > 0,
       status: u.subscription_status,
       planExpiresAt: u.plan_expires_at,
       isAdmin: u.is_admin,

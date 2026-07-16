@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,10 +42,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import net.rslvd.client.data.Tunnel
+import net.rslvd.client.tunnel.TunnelService
 
 @Composable
 fun TunnelsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val state by vm.tunnels.collectAsState()
+    val tunnelStates by TunnelService.states.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<Tunnel?>(null) }
 
@@ -74,10 +77,19 @@ fun TunnelsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(state.items, key = { it.id }) { t ->
+                        val status = tunnelStates[t.id]
                         TunnelCard(
                             tunnel = t,
-                            onCopyToken = { t.token?.let { vm.copyText("token", it) } },
-                            onCopyFqdn = { t.fqdn?.let { vm.copyText("hostname", it) } },
+                            status = status,
+                            onCopyToken = {
+                                val proto = t.protocol ?: "tcp"
+                                val flag = when (proto) { "udp" -> "-udp "; "dns2tcp" -> "-dns "; else -> "" }
+                                val cmd = "rslvd-tunnel $flag${t.token} ${t.targetPort ?: ""}".trim()
+                                val url = t.fqdn?.let { f -> "${if (t.forceHttps) "https" else "http"}://$f" } ?: ""
+                                vm.copyText("token + URL", listOf(url, cmd).filter { it.isNotBlank() }.joinToString("\n"))
+                            },
+                            onConnect = { vm.connectTunnel(t) },
+                            onDisconnect = { vm.disconnectTunnel(t) },
                             onDelete = { confirmDelete = t },
                         )
                     }
@@ -107,23 +119,41 @@ fun TunnelsScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TunnelCard(tunnel: Tunnel, onCopyToken: () -> Unit, onCopyFqdn: () -> Unit, onDelete: () -> Unit) {
+private fun TunnelCard(
+    tunnel: Tunnel,
+    status: String?,
+    onCopyToken: () -> Unit,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val connected = status != null
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(tunnel.fqdn ?: tunnel.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                IconButton(onClick = onCopyFqdn) { Icon(Icons.Filled.ContentCopy, "Copy hostname") }
                 IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error) }
             }
             Text(
-                "${tunnel.protocol?.uppercase() ?: "TCP"} → ${tunnel.targetHost ?: "localhost"}:${tunnel.targetPort ?: "?"}  ·  ${tunnel.status ?: "?"}",
+                "${tunnel.protocol?.uppercase() ?: "TCP"} → ${tunnel.targetHost ?: "localhost"}:${tunnel.targetPort ?: "?"}" +
+                    (status?.let { "  ·  $it" } ?: ""),
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                color = if (status == "connected") MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(8.dp))
-            if (!tunnel.token.isNullOrBlank()) {
-                OutlinedButton(onClick = onCopyToken) {
-                    Icon(Icons.Filled.ContentCopy, null, Modifier.height(16.dp)); Text(" Copy connect token")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!tunnel.token.isNullOrBlank()) {
+                    if (connected) {
+                        OutlinedButton(onClick = onDisconnect) { Text("Disconnect") }
+                    } else {
+                        OutlinedButton(onClick = onConnect) {
+                            Icon(Icons.Filled.PlayArrow, null, Modifier.height(16.dp)); Text(" Connect")
+                        }
+                    }
+                    OutlinedButton(onClick = onCopyToken) {
+                        Icon(Icons.Filled.ContentCopy, null, Modifier.height(16.dp)); Text(" Copy token + URL")
+                    }
                 }
             }
         }

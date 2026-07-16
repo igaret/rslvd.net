@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">rslvd.net</string>
-    <string name="title_activity_main">rslvd.net</string>
-    <string name="package_name">net.rslvd.client</string>
-    <string name="custom_url_scheme">net.rslvd.client</string>
-</resources>

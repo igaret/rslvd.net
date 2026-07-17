@@ -102,6 +102,7 @@ function Nav({ user, logout, navigate, pwa }) {
         (user.role === 'site_owner' || user.role === 'admin') &&
           React.createElement('button', { key: 'adm', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/admin') }, 'Admin'),
         React.createElement('button', { key: 'dash', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/dashboard') }, 'Dashboard'),
+        React.createElement('button', { key: 'sup', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/support') }, '🎫 Support'),
         React.createElement('button', { key: 'acct', className: 'btn btn-secondary btn-sm', onClick: () => navigate('/account') }, '⚙️ Account'),
         React.createElement('button', { key: 'out', className: 'btn btn-secondary btn-sm', onClick: () => { logout(); navigate('/'); } }, 'Sign out'),
       ] : [
@@ -481,6 +482,7 @@ function SupportPage({ user, navigate }) {
   const [viewing, setViewing] = useState(null);
   const [reply, setReply] = useState('');
   const [replying, setReplying] = useState(false);
+  const [escalating, setEscalating] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -491,16 +493,44 @@ function SupportPage({ user, navigate }) {
 
   useEffect(() => { load(); }, []);
 
+  // Poll the open thread while an AI reply may still be on its way
+  useEffect(() => {
+    if (!viewing || viewing.status !== 'open') return;
+    const timer = setInterval(async () => {
+      try {
+        const t = await API.get(`/support/${viewing.id}`);
+        setViewing(v => (v && v.id === t.id ? t : v));
+        if (t.status !== 'open') load();
+      } catch (e) {}
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [viewing && viewing.id, viewing && viewing.status]);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!subject.trim() || !body.trim()) return;
     setSending(true);
     try {
-      await API.post('/support', { subject: subject.trim(), body: body.trim() });
+      const ticket = await API.post('/support', { subject: subject.trim(), body: body.trim() });
       setSubject(''); setBody(''); setShowNew(false);
       await load();
+      const t = await API.get(`/support/${ticket.id}`);
+      setViewing(t);
     } catch (e) { alert(e.message); }
     finally { setSending(false); }
+  };
+
+  const handleEscalate = async () => {
+    if (!viewing) return;
+    if (!confirm('Escalate this ticket to the site owner? You\u2019ll get a personal reply as soon as possible.')) return;
+    setEscalating(true);
+    try {
+      await API.post(`/support/${viewing.id}/escalate`);
+      const t = await API.get(`/support/${viewing.id}`);
+      setViewing(t);
+      await load();
+    } catch (e) { alert(e.message); }
+    finally { setEscalating(false); }
   };
 
   const handleReply = async (e) => {
@@ -531,7 +561,7 @@ function SupportPage({ user, navigate }) {
     React.createElement('div', { className: 'dashboard-header' },
       React.createElement('div', null,
         React.createElement('h1', { style: { fontSize: 24, marginBottom: 4 } }, '🎫 Support'),
-        React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, 'Create a ticket to get help from our team.')
+        React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, 'Our AI assistant answers first — usually within a minute. Not solved? Escalate to a human anytime.')
       ),
       !showNew && !viewing && React.createElement('button', { className: 'btn btn-primary btn-sm', onClick: () => setShowNew(true) }, 'New ticket')
     ),
@@ -556,9 +586,9 @@ function SupportPage({ user, navigate }) {
             },
               React.createElement('div', { style: { flex: 1, minWidth: 0 } },
                 React.createElement('div', { style: { fontWeight: 500, fontSize: 15, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, t.subject),
-                React.createElement('div', { style: { fontSize: 12, color: 'var(--text3)' } }, `#${t.id} · ${t.message_count || 0} messages · updated ${relTime(t.updated_at)}`)
+                React.createElement('div', { style: { fontSize: 12, color: 'var(--text3)' } }, `#${t.id}${t.user_email ? ` · ${t.user_email}` : ''} · ${t.message_count || 0} messages · updated ${relTime(t.updated_at)}`)
               ),
-              React.createElement('span', { style: { fontSize: 11, fontWeight: 600, color: { open: 'var(--accent)', answered: 'var(--green)', closed: 'var(--text3)' }[t.status], textTransform: 'uppercase' } }, t.status)
+              React.createElement('span', { style: { fontSize: 11, fontWeight: 600, color: { open: 'var(--accent)', answered: 'var(--green)', escalated: 'var(--yellow)', closed: 'var(--text3)' }[t.status], textTransform: 'uppercase' } }, t.status === 'escalated' ? 'with the owner' : t.status)
             ))
           )
     ),
@@ -586,19 +616,23 @@ function SupportPage({ user, navigate }) {
     viewing && React.createElement('div', null,
       React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 } },
         React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: () => setViewing(null) }, '← All tickets'),
-        React.createElement('span', { style: { fontSize: 11, fontWeight: 600, color: { open: 'var(--accent)', answered: 'var(--green)', closed: 'var(--text3)' }[viewing.status], textTransform: 'uppercase' } }, viewing.status)
+        React.createElement('span', { style: { fontSize: 11, fontWeight: 600, color: { open: 'var(--accent)', answered: 'var(--green)', escalated: 'var(--yellow)', closed: 'var(--text3)' }[viewing.status], textTransform: 'uppercase' } }, viewing.status === 'escalated' ? 'with the owner' : viewing.status),
+        viewing.status !== 'closed' && viewing.status !== 'escalated' && React.createElement('button', { className: 'btn btn-secondary btn-sm', style: { marginLeft: 'auto' }, onClick: handleEscalate, disabled: escalating }, escalating ? React.createElement(Spinner) : 'Escalate to a human')
       ),
       React.createElement('div', { className: 'card', style: { marginBottom: 16 } },
         React.createElement('h2', { style: { fontSize: 17, marginBottom: 4 } }, viewing.subject),
         React.createElement('div', { style: { fontSize: 12, color: 'var(--text3)' } }, `Ticket #${viewing.id} · Created ${relTime(viewing.created_at)}`)
       ),
       React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 } },
-        viewing.messages && viewing.messages.map(m => React.createElement('div', { key: m.id, style: { display: 'flex', gap: 12, justifyContent: m.is_staff ? 'flex-start' : 'flex-end' } },
-          React.createElement('div', { style: { maxWidth: '80%', padding: '10px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.7, background: m.is_staff ? 'var(--accent-bg)' : 'var(--bg2)', border: m.is_staff ? '1px solid rgba(108,99,255,0.3)' : '1px solid var(--border)' } },
-            React.createElement('div', { style: { fontSize: 11, color: 'var(--text3)', marginBottom: 4 } }, m.is_staff ? `🛡 Staff · ${relTime(m.created_at)}` : `👤 You · ${relTime(m.created_at)}`),
+        viewing.messages && viewing.messages.map(m => React.createElement('div', { key: m.id, style: { display: 'flex', gap: 12, justifyContent: (m.is_staff || m.is_ai) ? 'flex-start' : 'flex-end' } },
+          React.createElement('div', { style: { maxWidth: '80%', padding: '10px 14px', borderRadius: 10, fontSize: 13, lineHeight: 1.7, background: (m.is_staff || m.is_ai) ? 'var(--accent-bg)' : 'var(--bg2)', border: (m.is_staff || m.is_ai) ? '1px solid rgba(108,99,255,0.3)' : '1px solid var(--border)' } },
+            React.createElement('div', { style: { fontSize: 11, color: 'var(--text3)', marginBottom: 4 } }, m.is_ai ? `🤖 AI Assistant · ${relTime(m.created_at)}` : m.is_staff ? `🛡 Site Owner · ${relTime(m.created_at)}` : `👤 You · ${relTime(m.created_at)}`),
             React.createElement('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, m.body)
           )
-        ))
+        )),
+        viewing.status === 'open' && viewing.messages && viewing.messages.length > 0 && !viewing.messages[viewing.messages.length - 1].is_ai && !viewing.messages[viewing.messages.length - 1].is_staff && React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text3)', fontSize: 12 } },
+          React.createElement(Spinner), 'AI assistant is typing…'
+        )
       ),
       viewing.status !== 'closed' && React.createElement('form', { onSubmit: handleReply, className: 'card' },
         React.createElement('label', { style: { display: 'block', fontSize: 13, color: 'var(--text2)', marginBottom: 8 } }, 'Reply'),
@@ -1487,7 +1521,7 @@ function Dashboard({ user, navigate, refreshUser, pwa }) {
                 React.createElement('h3', { style: { marginBottom: 4 } }, `${planLabel[user.plan]} plan`),
                 React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14 } }, `${user.maxHosts >= 999999 ? 'Unlimited' : user.maxHosts} hostnames · ${user.maxTunnels >= 999999 ? 'Unlimited' : user.maxTunnels} tunnels`),
                 user.status === 'cancelling'
-                  ? React.createElement('p', { style: { color: 'var(--warning)', fontSize: 13, marginTop: 4, fontWeight: 600 } }, `Cancelling — active until ${subscription && subscription.paidThroughDate ? new Date(subscription.paidThroughDate).toLocaleDateString() : (user.planExpiresAt ? new Date(user.planExpiresAt).toLocaleDateString() : 'end of billing period')}`)
+                  ? React.createElement('p', { style: { color: 'var(--yellow)', fontSize: 13, marginTop: 4, fontWeight: 600 } }, `Cancelling — active until ${subscription && subscription.paidThroughDate ? new Date(subscription.paidThroughDate).toLocaleDateString() : (user.planExpiresAt ? new Date(user.planExpiresAt).toLocaleDateString() : 'end of billing period')}`)
                   : subscription && subscription.paidThroughDate && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `Paid through ${new Date(subscription.paidThroughDate).toLocaleDateString()}`),
                 subscription && subscription.paymentMethod && React.createElement('p', { style: { color: 'var(--text3)', fontSize: 13, marginTop: 4 } }, `${subscription.paymentMethod.type} ending in ${subscription.paymentMethod.last4} · Exp ${subscription.paymentMethod.expirationMonth}/${subscription.paymentMethod.expirationYear}`)
               ),
@@ -3485,6 +3519,7 @@ function App() {
     path === '/reset-password' && React.createElement(ResetPasswordPage, { navigate }),
     path === '/dashboard' && auth.user && React.createElement(Dashboard, { user: auth.user, navigate, refreshUser: auth.refreshUser, pwa }),
     path === '/account' && auth.user && React.createElement(AccountPage, { user: auth.user, navigate, refreshUser: auth.refreshUser, logout: auth.logout }),
+    path === '/support' && auth.user && React.createElement(SupportPage, { user: auth.user, navigate }),
     path === '/admin' && auth.user && (auth.user.role === 'admin' || auth.user.role === 'site_owner') &&
       React.createElement(AdminDashboard, { user: auth.user, navigate }),
     path === '/terms'   && React.createElement(TermsPage,   { navigate }),

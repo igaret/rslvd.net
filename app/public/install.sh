@@ -11,7 +11,7 @@ BASE_URL="https://rslvd.net/dl"
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
   INSTALL_DIR="$PREFIX/bin"
 else
-  INSTALL_DIR="$HOME/.local/bin"
+  INSTALL_DIR="/usr/local/bin"
 fi
 BINARY="$INSTALL_DIR/rslvd-tunnel"
 

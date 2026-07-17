@@ -2,6 +2,8 @@ const router = require('express').Router();
 const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const { sendMail } = require('../lib/mailer');
+const supportAi = require('../lib/support-ai');
+const { notifyAdmin } = require('../lib/notify');
 
 const isStaff = (user) => user.is_admin || user.is_site_owner;
 
@@ -41,6 +43,12 @@ router.post('/', requireAuth, async (req, res) => {
       `INSERT INTO ticket_messages (ticket_id, user_id, is_staff, body) VALUES ($1, $2, FALSE, $3)`,
       [ticket.id, req.user.id, body.trim()]
     );
+
+    // AI answers first; the owner is only notified on escalation.
+    if (supportAi.configured()) {
+      supportAi.respond(ticket.id);
+      return res.status(201).json(ticket);
+    }
 
     // Notify site owner
     const notifyTo = process.env.NOTIFY_EMAIL;
@@ -97,11 +105,37 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
       `INSERT INTO ticket_messages (ticket_id, user_id, is_staff, body) VALUES ($1, $2, $3, $4) RETURNING *`,
       [ticket.id, u.id, isStaff(u), body.trim()]
     );
+    const newStatus = isStaff(u) ? 'answered'
+      : ticket.status === 'escalated' ? 'escalated'
+      : 'open';
     await pool.query(
       `UPDATE support_tickets SET updated_at = NOW(), status = $1 WHERE id = $2`,
-      [isStaff(u) ? 'answered' : 'open', ticket.id]
+      [newStatus, ticket.id]
     );
+    if (!isStaff(u) && ticket.status !== 'escalated' && supportAi.configured()) {
+      supportAi.respond(ticket.id);
+    } else if (!isStaff(u) && ticket.status === 'escalated') {
+      notifyAdmin(
+        `Support ticket #${ticket.id}: new reply`,
+        `${u.email} replied on an escalated ticket.\n\n${body.trim().slice(0, 500)}\n\nhttps://rslvd.net/support`
+      ).catch(e => console.error('[support] notify failed:', e.message));
+    }
     res.status(201).json(msg);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Escalate to a human (ticket owner or staff) ──────────────────────────
+router.post('/:id/escalate', requireAuth, async (req, res) => {
+  try {
+    const u = req.user;
+    const { rows: [ticket] } = await pool.query('SELECT * FROM support_tickets WHERE id = $1', [req.params.id]);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+    if (!isStaff(u) && ticket.user_id !== u.id) return res.status(403).json({ error: 'Forbidden' });
+    if (ticket.status === 'closed') return res.status(400).json({ error: 'Ticket is closed' });
+    if (ticket.status === 'escalated') return res.json(ticket);
+
+    const updated = await supportAi.escalate(ticket.id, 'The user asked for a human.');
+    res.json(updated || ticket);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -110,7 +144,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   try {
     if (!isStaff(req.user)) return res.status(403).json({ error: 'Staff only' });
     const { status, priority } = req.body;
-    const allowed_status = ['open', 'answered', 'closed'];
+    const allowed_status = ['open', 'answered', 'escalated', 'closed'];
     const allowed_priority = ['low', 'normal', 'high', 'urgent'];
     if (status && !allowed_status.includes(status)) return res.status(400).json({ error: 'Invalid status' });
     if (priority && !allowed_priority.includes(priority)) return res.status(400).json({ error: 'Invalid priority' });

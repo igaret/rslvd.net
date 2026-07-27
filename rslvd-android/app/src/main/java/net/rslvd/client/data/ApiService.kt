@@ -48,4 +48,19 @@ interface ApiService {
 
     @POST("billing/cancel")
     suspend fun cancelSubscription(): Response<GenericResponse>
+
+    @GET("support")
+    suspend fun tickets(): Response<List<SupportTicket>>
+
+    @POST("support")
+    suspend fun createTicket(@Body body: CreateTicketRequest): Response<SupportTicket>
+
+    @GET("support/{id}")
+    suspend fun ticket(@Path("id") id: Int): Response<TicketDetail>
+
+    @POST("support/{id}/reply")
+    suspend fun replyTicket(@Path("id") id: Int, @Body body: TicketReplyRequest): Response<TicketMessage>
+
+    @POST("support/{id}/escalate")
+    suspend fun escalateTicket(@Path("id") id: Int): Response<SupportTicket>
 }

@@ -12,6 +12,8 @@ import net.rslvd.client.data.LoginResult
 import net.rslvd.client.data.PlanInfo
 import net.rslvd.client.data.SubscriptionInfo
 import net.rslvd.client.data.Repository
+import net.rslvd.client.data.SupportTicket
+import net.rslvd.client.data.TicketDetail
 import net.rslvd.client.data.Tunnel
 import net.rslvd.client.data.User
 import net.rslvd.client.ddns.DdnsConfig
@@ -28,6 +30,13 @@ data class HostsState(
 data class TunnelsState(
     val loading: Boolean = false,
     val items: List<Tunnel> = emptyList(),
+    val error: String? = null,
+)
+
+data class SupportState(
+    val loading: Boolean = false,
+    val tickets: List<SupportTicket> = emptyList(),
+    val viewing: TicketDetail? = null,
     val error: String? = null,
 )
 
@@ -59,6 +68,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _billing = MutableStateFlow(BillingState())
     val billing: StateFlow<BillingState> = _billing.asStateFlow()
+
+    private val _support = MutableStateFlow(SupportState())
+    val support: StateFlow<SupportState> = _support.asStateFlow()
 
     private val _ddns = MutableStateFlow(DdnsUiState())
     val ddns: StateFlow<DdnsUiState> = _ddns.asStateFlow()
@@ -244,6 +256,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             repo.cancelSubscription()
                 .onSuccess { toast("Subscription will end at your paid-through date"); loadBilling(); refreshUser(); onDone(true) }
                 .onFailure { toast(it.message ?: "Cancellation failed"); onDone(false) }
+        }
+    }
+
+    // ── Support ─────────────────────────────────────────────────────────────
+    fun loadTickets() {
+        _support.value = _support.value.copy(loading = true, error = null)
+        viewModelScope.launch {
+            repo.tickets()
+                .onSuccess { _support.value = _support.value.copy(loading = false, tickets = it) }
+                .onFailure { handleAuthError(it); _support.value = _support.value.copy(loading = false, error = it.message) }
+        }
+    }
+
+    fun openTicket(id: Int) {
+        viewModelScope.launch {
+            repo.ticket(id)
+                .onSuccess { _support.value = _support.value.copy(viewing = it) }
+                .onFailure { toast(it.message ?: "Failed to load ticket") }
+        }
+    }
+
+    /** Silently refresh the open thread (used for AI-reply polling). */
+    fun refreshOpenTicket() {
+        val current = _support.value.viewing ?: return
+        viewModelScope.launch {
+            repo.ticket(current.id).onSuccess {
+                if (_support.value.viewing?.id == it.id) _support.value = _support.value.copy(viewing = it)
+            }
+        }
+    }
+
+    fun closeTicketView() {
+        _support.value = _support.value.copy(viewing = null)
+        loadTickets()
+    }
+
+    fun createTicket(subject: String, body: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            repo.createTicket(subject, body)
+                .onSuccess { openTicket(it.id); loadTickets(); onDone(true) }
+                .onFailure { toast(it.message ?: "Failed to create ticket"); onDone(false) }
+        }
+    }
+
+    fun replyTicket(body: String, onDone: (Boolean) -> Unit) {
+        val ticket = _support.value.viewing ?: return onDone(false)
+        viewModelScope.launch {
+            repo.replyTicket(ticket.id, body)
+                .onSuccess { openTicket(ticket.id); onDone(true) }
+                .onFailure { toast(it.message ?: "Failed to send reply"); onDone(false) }
+        }
+    }
+
+    fun escalateTicket() {
+        val ticket = _support.value.viewing ?: return
+        viewModelScope.launch {
+            repo.escalateTicket(ticket.id)
+                .onSuccess { toast("Escalated — the site owner has been notified"); openTicket(ticket.id); loadTickets() }
+                .onFailure { toast(it.message ?: "Failed to escalate") }
         }
     }
 

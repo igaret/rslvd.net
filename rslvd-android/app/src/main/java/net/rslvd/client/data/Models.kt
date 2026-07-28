@@ -104,6 +104,43 @@ data class SubscriptionInfo(
     val error: String? = null,
 )
 
+data class SupportTicket(
+    val id: Int,
+    val subject: String,
+    val status: String? = null,
+    @Json(name = "message_count") val messageCount: Int? = null,
+    @Json(name = "user_email") val userEmail: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "updated_at") val updatedAt: String? = null,
+)
+
+data class TicketMessage(
+    val id: Int,
+    @Json(name = "is_staff") val isStaff: Boolean = false,
+    @Json(name = "is_ai") val isAi: Boolean = false,
+    val body: String,
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "sender_email") val senderEmail: String? = null,
+)
+
+data class TicketDetail(
+    val id: Int,
+    val subject: String,
+    val status: String? = null,
+    @Json(name = "user_email") val userEmail: String? = null,
+    @Json(name = "created_at") val createdAt: String? = null,
+    val messages: List<TicketMessage> = emptyList(),
+)
+
+data class CreateTicketRequest(
+    val subject: String,
+    val body: String,
+)
+
+data class TicketReplyRequest(
+    val body: String,
+)
+
 data class GenericResponse(
     val success: Boolean? = null,
     val error: String? = null,

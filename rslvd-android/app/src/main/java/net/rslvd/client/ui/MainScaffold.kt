@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +34,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     Ddns("DDNS", Icons.Filled.Sync),
     Billing("Billing", Icons.Filled.CreditCard),
     Terminal("Shell", Icons.Filled.Terminal),
+    Support("Support", Icons.Filled.SupportAgent),
     Account("Account", Icons.Filled.AccountCircle),
 }
 
@@ -73,6 +75,7 @@ fun MainScaffold(vm: AppViewModel) {
             Tab.Ddns -> DdnsScreen(vm, mod)
             Tab.Billing -> BillingScreen(vm, mod)
             Tab.Terminal -> TerminalScreen(mod)
+            Tab.Support -> SupportScreen(vm, mod)
             Tab.Account -> AccountScreen(vm, mod)
         }
     }

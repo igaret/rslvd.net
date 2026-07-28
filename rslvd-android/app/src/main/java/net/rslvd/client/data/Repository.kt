@@ -87,6 +87,18 @@ class Repository private constructor(
 
     suspend fun cancelSubscription(): Result<Unit> = callUnit { api.cancelSubscription() }
 
+    suspend fun tickets(): Result<List<SupportTicket>> = call { api.tickets() }
+
+    suspend fun createTicket(subject: String, body: String): Result<SupportTicket> =
+        call { api.createTicket(CreateTicketRequest(subject.trim(), body.trim())) }
+
+    suspend fun ticket(id: Int): Result<TicketDetail> = call { api.ticket(id) }
+
+    suspend fun replyTicket(id: Int, body: String): Result<TicketMessage> =
+        call { api.replyTicket(id, TicketReplyRequest(body.trim())) }
+
+    suspend fun escalateTicket(id: Int): Result<SupportTicket> = call { api.escalateTicket(id) }
+
     fun logout() = tokenStore.clear()
 
     fun isLoggedIn() = tokenStore.isLoggedIn()

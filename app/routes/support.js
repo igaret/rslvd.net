@@ -14,12 +14,12 @@ router.get('/', requireAuth, async (req, res) => {
     const { rows } = isStaff(u)
       ? await pool.query(
           `SELECT t.*, u.email as user_email,
-            (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count
+            (SELECT COUNT(*)::int FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count
            FROM support_tickets t JOIN users u ON u.id = t.user_id
            ORDER BY t.updated_at DESC`)
       : await pool.query(
           `SELECT t.*,
-            (SELECT COUNT(*) FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count
+            (SELECT COUNT(*)::int FROM ticket_messages m WHERE m.ticket_id = t.id) AS message_count
            FROM support_tickets t WHERE t.user_id = $1 ORDER BY t.updated_at DESC`,
           [u.id]);
     res.json(rows);

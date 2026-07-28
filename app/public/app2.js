@@ -151,6 +151,33 @@ function Landing({ navigate }) {
   ];
 
   const [openFaq, setOpenFaq] = React.useState(null);
+  const [beta, setBeta] = React.useState(null);
+  const [betaEmail, setBetaEmail] = React.useState('');
+  const [betaName, setBetaName] = React.useState('');
+  const [betaBusy, setBetaBusy] = React.useState(false);
+  const [betaMsg, setBetaMsg] = React.useState('');
+
+  React.useEffect(() => {
+    fetch('/api/beta/status').then(r => r.json()).then(setBeta).catch(() => {});
+  }, []);
+
+  const betaSignup = async (e) => {
+    e.preventDefault();
+    setBetaBusy(true); setBetaMsg('');
+    try {
+      const r = await fetch('/api/beta/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: betaEmail.trim(), name: betaName.trim() })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Signup failed');
+      setBetaMsg(`You're in — tester ${data.spot} of ${data.max}! We'll email you the Play Store beta invite.`);
+      setBetaEmail(''); setBetaName('');
+      setBeta(b => b ? { ...b, taken: data.spot, remaining: Math.max(0, data.max - data.spot) } : b);
+    } catch (err) { setBetaMsg(err.message); }
+    finally { setBetaBusy(false); }
+  };
 
   return React.createElement('div', null,
 
@@ -263,6 +290,27 @@ function Landing({ navigate }) {
         ),
         openFaq === i && React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, lineHeight: 1.7, paddingBottom: 16, margin: 0 } }, f.a)
       ))
+    ),
+
+    // ── Android beta signup ──────────────────────────────────────────────
+    beta && beta.remaining >= 0 && React.createElement('div', { style: { maxWidth: 640, margin: '0 auto 80px', padding: '0 24px' } },
+      React.createElement('div', { className: 'card', style: { textAlign: 'center', border: '1px solid rgba(108,99,255,0.4)' } },
+        React.createElement('div', { style: { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 14px', background: 'var(--accent-bg)', borderRadius: 999, fontSize: 12, color: 'var(--accent2)', marginBottom: 14 } },
+          `🤖 Android app beta — ${beta.remaining} of ${beta.max} spots left`
+        ),
+        React.createElement('h2', { style: { fontSize: 22, marginBottom: 8 } }, 'Be one of our 12 beta testers'),
+        React.createElement('p', { style: { color: 'var(--text2)', fontSize: 14, marginBottom: 20 } },
+          'Help us launch the rslvd Android app on the Play Store. Sign up and we\u2019ll email you the closed-beta invite — DDNS auto-updates, a built-in tunnel client, and a shell, all from your phone.'
+        ),
+        betaMsg && React.createElement('p', { style: { color: betaMsg.startsWith("You're in") ? 'var(--green)' : 'var(--yellow)', fontSize: 14, marginBottom: 14 } }, betaMsg),
+        beta.remaining > 0
+          ? React.createElement('form', { onSubmit: betaSignup, style: { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' } },
+              React.createElement('input', { className: 'input', style: { maxWidth: 170 }, value: betaName, onChange: e => setBetaName(e.target.value), placeholder: 'Name (optional)', maxLength: 100 }),
+              React.createElement('input', { className: 'input', style: { maxWidth: 240 }, type: 'email', required: true, value: betaEmail, onChange: e => setBetaEmail(e.target.value), placeholder: 'you@example.com' }),
+              React.createElement('button', { type: 'submit', className: 'btn btn-primary', disabled: betaBusy }, betaBusy ? '…' : 'Join the beta')
+            )
+          : React.createElement('p', { style: { color: 'var(--text3)', fontSize: 14 } }, 'All 12 beta spots are taken — thanks for the amazing response!')
+      )
     ),
 
     // ── Bottom CTA ────────────────────────────────────────────────────────────

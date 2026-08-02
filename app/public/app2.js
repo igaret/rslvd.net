@@ -3579,7 +3579,7 @@ function App() {
     path === '/tutorials/windows-tunnel' && React.createElement(TutorialWindowsTunnel, { navigate }),
     path === '/verify-email' && React.createElement(VerifyEmailPage, { navigate }),
     path === '/downloads' && React.createElement(DownloadsPage, { navigate }),
-    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel', '/verify-email', '/downloads'].includes(path) &&
+    !['/', '/login', '/register', '/dashboard', '/admin', '/pricing', '/account', '/terms', '/privacy', '/forgot-password', '/reset-password', '/tutorials', '/tutorials/linux-subdomain', '/tutorials/windows-subdomain', '/tutorials/linux-tunnel', '/tutorials/windows-tunnel', '/verify-email', '/downloads', '/support'].includes(path) &&
       React.createElement('div', { className: 'flex-center', style: { minHeight: 400, flexDirection: 'column', gap: 16 } },
         React.createElement('h1', null, '404'),
         React.createElement('p', { style: { color: 'var(--text2)' } }, 'Page not found'),

@@ -821,6 +821,9 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
   const [showConnect, setShowConnect] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [deviceLock, setDeviceLock] = useState(t.device_lock === true);
+  const [boundName, setBoundName] = useState(t.bound_device_name || (t.bound_at ? 'unnamed device' : null));
+  const [lockBusy, setLockBusy] = useState(false);
 
   const handleDelete = async () => {
     if (!confirm(`Delete tunnel ${t.name}?`)) return;
@@ -837,6 +840,28 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
       if (onHttpsToggle) onHttpsToggle(t.id, next);
     } catch (err) { alert(err.message); }
     finally { setToggling(false); }
+  };
+
+  const handleDeviceLockToggle = async () => {
+    const next = !deviceLock;
+    if (next && !confirm('Enable device lock? The first device to connect will be permanently bound to this tunnel\u2019s token \u2014 other devices will be rejected. (DNS2TCP tunnels can\u2019t use device lock.)')) return;
+    setLockBusy(true);
+    try {
+      await API.patch(`/tunnels/${t.id}/device-lock`, { device_lock: next });
+      setDeviceLock(next);
+      if (!next) setBoundName(null);
+    } catch (err) { alert(err.message); }
+    finally { setLockBusy(false); }
+  };
+
+  const handleDeviceReset = async () => {
+    if (!confirm('Reset device binding? The next device to connect becomes the new bound device.')) return;
+    setLockBusy(true);
+    try {
+      await API.post(`/tunnels/${t.id}/reset-device`, {});
+      setBoundName(null);
+    } catch (err) { alert(err.message); }
+    finally { setLockBusy(false); }
   };
 
   const fqdn = t.fqdn || `${t.name}.rslvd.net`;
@@ -873,6 +898,12 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
           title: useHttps ? 'HTTPS enabled (click to switch to HTTP)' : 'HTTP only (click to enable HTTPS)',
           style: { fontSize: 11, padding: '2px 8px', minWidth: 60, opacity: toggling ? 0.6 : 1 }
         }, toggling ? '...' : (useHttps ? '🔒 HTTPS' : '🔓 HTTP')),
+        protocol !== 'dns2tcp' && React.createElement('button', {
+          className: 'btn btn-sm btn-secondary',
+          onClick: handleDeviceLockToggle, disabled: lockBusy,
+          title: deviceLock ? 'Device lock on — token bound to one device (click to disable)' : 'Device lock off — any device with the token can connect (click to enable)',
+          style: { fontSize: 11, padding: '2px 8px', opacity: lockBusy ? 0.6 : 1 }
+        }, lockBusy ? '...' : (deviceLock ? '🔐 Locked' : '🔓 Any device')),
         React.createElement('span', { className: `badge badge-${t.status === 'active' ? 'green' : 'yellow'}` }, t.status),
         React.createElement('button', {
           className: `btn btn-primary btn-sm`,
@@ -984,6 +1015,16 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
       React.createElement('div', { style: { marginTop: 12, padding: '10px 14px', background: 'var(--bg3)', borderRadius: 8, fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 8 } },
         '🔗 Public URL: ',
         React.createElement('a', { href: publicUrl, target: '_blank', style: { color: 'var(--accent2)', fontWeight: 600 } }, publicUrl)
+      ),
+
+      deviceLock && React.createElement('div', { style: { marginTop: 8, padding: '10px 14px', background: 'var(--bg3)', borderRadius: 8, fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+        '🔐 Device lock: ',
+        boundName
+          ? React.createElement(React.Fragment, null,
+              React.createElement('strong', { style: { color: 'var(--text2)' } }, boundName),
+              React.createElement('button', { className: 'btn btn-secondary btn-sm', onClick: handleDeviceReset, disabled: lockBusy, style: { fontSize: 11, padding: '2px 8px' } }, 'Reset binding')
+            )
+          : 'waiting for first device — the next device to connect will be bound to this token'
       )
     )
   );

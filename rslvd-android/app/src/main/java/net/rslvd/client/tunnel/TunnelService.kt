@@ -86,7 +86,7 @@ class TunnelService : Service() {
                     names[id] = name
                     setState(id, "connecting")
                     jobs[id] = scope.launch {
-                        val client = TunnelClient(token, targetHost, targetPort, protocol) { status ->
+                        val client = TunnelClient(token, targetHost, targetPort, protocol, DeviceIdentity.id(this@TunnelService), DeviceIdentity.name()) { status ->
                             setState(id, status)
                             updateNotification()
                         }

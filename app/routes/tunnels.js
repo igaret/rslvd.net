@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const { requireAuth } = require('../middleware/auth');
 const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
+const dnsAudit = require('../lib/dns-audit');
 const tunnelCert = require('../lib/tunnel-cert');
 const { activeBonus } = require('../lib/plans');
 
@@ -118,6 +119,7 @@ router.post('/', async (req, res) => {
       }
 
       activity.log('tunnel.create', { userId: user.id, detail: fqdn, req });
+      dnsAudit.record({ userId: user.id, tunnelId: result.rows[0].id, fqdn, change: 'tunnel_created', req });
       return res.status(201).json({ ...result.rows[0], parent_fqdn: parent.fqdn });
     }
 
@@ -174,6 +176,7 @@ router.post('/', async (req, res) => {
     if (!wantHttps) tunnelCert.enableHttpFallback(fqdn);
 
     activity.log('tunnel.create', { userId: user.id, detail: fqdn, req });
+    dnsAudit.record({ userId: user.id, tunnelId: result.rows[0].id, fqdn, change: 'tunnel_created', req });
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error(err);
@@ -215,6 +218,7 @@ router.delete('/:id', async (req, res) => {
     tunnelCert.disableHttpFallback(t.fqdn);
 
     activity.log('tunnel.delete', { userId: req.user.id, detail: t.fqdn, req });
+    dnsAudit.record({ userId: req.user.id, fqdn: t.fqdn, change: 'tunnel_deleted', req });
     await pool.query('DELETE FROM tunnels WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
@@ -243,6 +247,7 @@ router.patch('/:id/https', async (req, res) => {
     }
 
     activity.log('tunnel.https_toggle', { userId: req.user.id, detail: `${t.fqdn} \u2192 ${force_https ? 'on' : 'off'}`, req });
+    dnsAudit.record({ userId: req.user.id, tunnelId: t.id, fqdn: t.fqdn, change: force_https ? 'https_enabled' : 'https_disabled', req });
     res.json({ force_https });
   } catch (err) {
     console.error(err);

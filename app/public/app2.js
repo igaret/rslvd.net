@@ -904,7 +904,10 @@ function TunnelRow({ tunnel: t, onDelete, onHttpsToggle, isNested }) {
           title: deviceLock ? 'Device lock on — token bound to one device (click to disable)' : 'Device lock off — any device with the token can connect (click to enable)',
           style: { fontSize: 11, padding: '2px 8px', opacity: lockBusy ? 0.6 : 1 }
         }, lockBusy ? '...' : (deviceLock ? '🔐 Locked' : '🔓 Any device')),
-        React.createElement('span', { className: `badge badge-${t.status === 'active' ? 'green' : 'yellow'}` }, t.status),
+        React.createElement('span', {
+          className: `badge badge-${t.connected ? 'green' : 'yellow'}`,
+          title: t.connected ? 'A tunnel agent is connected' : 'No tunnel agent is connected — run the client with your token'
+        }, t.connected ? 'connected' : 'waiting for agent'),
         React.createElement('button', {
           className: `btn btn-primary btn-sm`,
           onClick: () => setShowConnect(!showConnect)

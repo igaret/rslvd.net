@@ -6,6 +6,7 @@ const ionos = require('../lib/ionos');
 const activity = require('../lib/activity');
 const tunnelCert = require('../lib/tunnel-cert');
 const { activeBonus } = require('../lib/plans');
+const tunnelProxy = require('../lib/tunnel-proxy');
 
 const PORT_MIN = 20000;
 const PORT_MAX = 29999;
@@ -39,7 +40,7 @@ router.get('/', async (req, res) => {
      FROM tunnels WHERE user_id = $1 ORDER BY parent_tunnel_id NULLS FIRST, created_at DESC`,
     [req.user.id]
   );
-  res.json(result.rows);
+  res.json(result.rows.map((t) => ({ ...t, connected: tunnelProxy.isConnected(t.fqdn) })));
 });
 
 // ── Create tunnel ────────────────────────────────────────────────────────────

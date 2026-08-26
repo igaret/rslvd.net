@@ -730,4 +730,13 @@ function startTunnelProxy() {
   tcpPublicServer.on('error',  (e) => log(`TCP Public server error: ${e.message}`));
 }
 
-module.exports = { startTunnelProxy };
+// Live check: is a tunnel agent currently attached for this fqdn?
+function isConnected(fqdn) {
+  if (clients.has(fqdn)) return true;
+  for (const s of dns2tcpSessions.values()) {
+    if (s.fqdn === fqdn) return true;
+  }
+  return false;
+}
+
+module.exports = { startTunnelProxy, isConnected };

@@ -280,6 +280,11 @@ CREATE INDEX IF NOT EXISTS idx_dns_changes_user ON dns_changes(user_id, created_
 CREATE INDEX IF NOT EXISTS idx_dns_changes_host ON dns_changes(host_id);
 CREATE INDEX IF NOT EXISTS idx_dns_changes_tunnel ON dns_changes(tunnel_id);
 
+ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS device_lock BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS bound_device VARCHAR(128);
+ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS bound_device_name VARCHAR(100);
+ALTER TABLE tunnels ADD COLUMN IF NOT EXISTS bound_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS beta_testers (
   id SERIAL PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,

@@ -21,8 +21,8 @@ android {
         applicationId 'net.rslvd.client'
         minSdk 23
         targetSdk 36
-        versionCode 16
-        versionName '3.3'
+        versionCode 17
+        versionName '3.4'
         vectorDrawables { useSupportLibrary true }
     }
 
@@ -39,6 +39,10 @@ android {
             // package name must be net.rslvd.debug because the repo binaries
             // are compiled with prefix /data/data/net.rslvd.debug/files/usr.
             applicationId 'net.rslvd.debug'
+            // targetSdk 28 so the app may exec downloaded binaries from its
+            // data dir (Android 10+ W^X blocks this for targetSdk >= 29 —
+            // same reason Termux's sideload build targets 28).
+            targetSdk 28
             buildConfigField 'boolean', 'BOOTSTRAP_ENABLED', 'true'
         }
     }
@@ -57,7 +61,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix '.debug'
             versionNameSuffix '-debug'
         }
         release {

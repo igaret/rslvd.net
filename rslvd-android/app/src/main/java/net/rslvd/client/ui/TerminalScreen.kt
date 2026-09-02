@@ -270,7 +270,7 @@ private fun BootstrapInstallScreen(
             Text(
                 "Install the rslvd shell environment — a full Linux userland with " +
                     "pkg/apt, dpkg, netcat, nmap, dig and more, served from repo.rslvd.net. " +
-                    "One-time download (~30 MB) into the app's private storage.",
+                    "One-time download (~65 MB) into the app's private storage.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             if (busy) {

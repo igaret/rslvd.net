@@ -21,10 +21,28 @@ android {
         applicationId 'net.rslvd.client'
         minSdk 23
         targetSdk 36
-        versionCode 15
-        versionName '3.2'
+        versionCode 16
+        versionName '3.3'
         vectorDrawables { useSupportLibrary true }
     }
+
+    flavorDimensions = ['dist']
+    productFlavors {
+        play {
+            dimension 'dist'
+            // Play Store build: keeps the sandboxed /system/bin/sh shell only.
+            buildConfigField 'boolean', 'BOOTSTRAP_ENABLED', 'false'
+        }
+        full {
+            dimension 'dist'
+            // Sideload build with the Termux-style bootstrap environment. The
+            // package name must be net.rslvd.debug because the repo binaries
+            // are compiled with prefix /data/data/net.rslvd.debug/files/usr.
+            applicationId 'net.rslvd.debug'
+            buildConfigField 'boolean', 'BOOTSTRAP_ENABLED', 'true'
+        }
+    }
+
 
     if (hasKeystore) {
         signingConfigs {

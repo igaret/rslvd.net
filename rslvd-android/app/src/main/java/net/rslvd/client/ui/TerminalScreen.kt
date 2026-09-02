@@ -36,8 +36,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.withContext
+import net.rslvd.client.BuildConfig
+import net.rslvd.client.shell.BootstrapInstaller
 import java.io.BufferedWriter
 import java.io.OutputStreamWriter
 
@@ -47,7 +58,7 @@ import java.io.OutputStreamWriter
  * (ping, ip, netstat, nslookup, getprop, ...) for on-device network
  * diagnostics without a third-party terminal app.
  */
-class ShellSession(context: Context) {
+class ShellSession(private val context: Context) {
     private val buffer = StringBuilder()
     private val _output = MutableStateFlow("")
     val output: StateFlow<String> = _output
@@ -74,11 +85,25 @@ class ShellSession(context: Context) {
 
     private fun start() {
         try {
-            val pb = ProcessBuilder("/system/bin/sh")
-                .redirectErrorStream(true)
-            pb.directory(java.io.File(home))
-            pb.environment()["HOME"] = home
-            pb.environment()["TMPDIR"] = tmp
+            val bootstrap = BuildConfig.BOOTSTRAP_ENABLED && BootstrapInstaller.isInstalled(context)
+            val pb: ProcessBuilder
+            if (bootstrap) {
+                val prefix = BootstrapInstaller.prefixDir(context)
+                val shell = listOf("bin/bash", "bin/sh", "bin/dash")
+                    .map { java.io.File(prefix, it) }
+                    .firstOrNull { it.exists() }
+                pb = ProcessBuilder(shell?.absolutePath ?: "/system/bin/sh", "-l")
+                    .redirectErrorStream(true)
+                val env = BootstrapInstaller.environment(context)
+                pb.directory(java.io.File(env["HOME"] ?: home))
+                pb.environment().putAll(env)
+            } else {
+                pb = ProcessBuilder("/system/bin/sh")
+                    .redirectErrorStream(true)
+                pb.directory(java.io.File(home))
+                pb.environment()["HOME"] = home
+                pb.environment()["TMPDIR"] = tmp
+            }
             val p = pb.start()
             process = p
             writer = BufferedWriter(OutputStreamWriter(p.outputStream))
@@ -95,7 +120,11 @@ class ShellSession(context: Context) {
                 }
                 append("\n[process exited]\n")
             }.apply { isDaemon = true }.start()
-            append("rslvd shell — /system/bin/sh (app sandbox)\nTry: ping -c 4 rslvd.net · ip addr · netstat · getprop\n\n")
+            if (BuildConfig.BOOTSTRAP_ENABLED && BootstrapInstaller.isInstalled(context)) {
+                append("rslvd shell — bootstrap environment (\$PREFIX)\nTry: pkg install <name> · apt list · nmap · dig · nc\n\n")
+            } else {
+                append("rslvd shell — /system/bin/sh (app sandbox)\nTry: ping -c 4 rslvd.net · ip addr · netstat · getprop\n\n")
+            }
         } catch (e: Exception) {
             append("Failed to start shell: ${e.message}\n")
         }
@@ -157,6 +186,15 @@ class ShellSession(context: Context) {
 @Composable
 fun TerminalScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current.applicationContext
+
+    if (BuildConfig.BOOTSTRAP_ENABLED) {
+        var installed by remember { mutableStateOf(BootstrapInstaller.isInstalled(context)) }
+        if (!installed) {
+            BootstrapInstallScreen(modifier, context) { installed = true }
+            return
+        }
+    }
+
     val session = remember { ShellSession(context) }
     DisposableEffect(Unit) { onDispose { session.close() } }
 
@@ -206,6 +244,58 @@ fun TerminalScreen(modifier: Modifier = Modifier) {
             Spacer(Modifier.width(6.dp))
             IconButton(onClick = { submit() }) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Run")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BootstrapInstallScreen(
+    modifier: Modifier,
+    context: Context,
+    onInstalled: () -> Unit,
+) {
+    var status by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(24.dp),
+        ) {
+            Text("Shell environment", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "Install the rslvd shell environment — a full Linux userland with " +
+                    "pkg/apt, dpkg, netcat, nmap, dig and more, served from repo.rslvd.net. " +
+                    "One-time download (~30 MB) into the app's private storage.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (busy) {
+                CircularProgressIndicator()
+                Text(status ?: "Working…", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Button(onClick = {
+                    busy = true
+                    error = null
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                BootstrapInstaller.install(context) { status = it }
+                            }
+                            onInstalled()
+                        } catch (e: Exception) {
+                            error = e.message ?: "Install failed"
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }) { Text("Install environment") }
+            }
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
     }

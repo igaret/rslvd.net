@@ -1,0 +1,22 @@
+diff --git a/packages/termux-tools/build.sh b/packages/termux-tools/build.sh
+index 9973785..5c377af 100644
+--- a/packages/termux-tools/build.sh
++++ b/packages/termux-tools/build.sh
+@@ -3,7 +3,7 @@ TERMUX_PKG_DESCRIPTION="Basic system tools for Termux"
+ TERMUX_PKG_LICENSE="GPL-3.0"
+ TERMUX_PKG_MAINTAINER="@termux"
+ TERMUX_PKG_VERSION="1.46.0+really1.45.0"
+-TERMUX_PKG_REVISION=1
++TERMUX_PKG_REVISION=2
+ TERMUX_PKG_SRCURL=https://github.com/termux/termux-tools/archive/refs/tags/v1.45.0.tar.gz
+ TERMUX_PKG_SHA256=1ae29b1b875d95cc626dae323b45a2ace759969862d96094b2fa6d13bffe20d2
+ TERMUX_PKG_ESSENTIAL=true
+@@ -23,6 +23,8 @@ TERMUX_PKG_RECOMMENDS="ed, dos2unix, inetutils, net-tools, patch, unzip"
+ 
+ termux_step_pre_configure() {
+ 	autoreconf -vfi
++	# configure.ac falls back to com.termux unless these are in the environment.
++	export TERMUX_APP_PACKAGE TERMUX_BASE_DIR TERMUX_CACHE_DIR TERMUX_PREFIX TERMUX_ANDROID_HOME
+ }
+ 
+ termux_step_post_make_install() {

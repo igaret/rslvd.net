@@ -6,7 +6,10 @@
 ##   TERMUX_PACKAGES_DIR  - checkout of termux-packages with
 ##                          TERMUX_APP__PACKAGE_NAME="net.rslvd.debug" and the
 ##                          apt sources.list pointed at repo.rslvd.net, with
-##                          packages already built into output/ (*.deb)
+##                          packages already built into output/ (*.deb).
+##                          Apply termux-tools-rslvd-prefix.patch first: without
+##                          it termux-tools' configure.ac silently falls back to
+##                          /data/data/com.termux paths in login/pkg/profile.d.
 ##   RSLVD_REPO_DIR       - staging dir for the repository (default ./repo-out)
 ##
 ## Output layout (rsync RSLVD_REPO_DIR to /opt/rslvd-repo on the server):

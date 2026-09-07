@@ -286,6 +286,8 @@ private fun BootstrapInstallScreen(
                                 BootstrapInstaller.install(context) { status = it }
                             }
                             onInstalled()
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             error = e.message ?: "Install failed"
                         } finally {

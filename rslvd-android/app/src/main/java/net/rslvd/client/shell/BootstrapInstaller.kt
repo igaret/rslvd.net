@@ -118,14 +118,14 @@ object BootstrapInstaller {
     }
 
     /**
-     * Point apt at our repo. The packaged sources.list still lists
-     * packages.termux.dev, whose binaries are built for a different prefix.
+     * Point apt at our repo. Release files are GPG-signed; the public key ships
+     * in rslvd-keyring (etc/apt/trusted.gpg.d/rslvd-repo.gpg) inside the bootstrap.
      */
     private fun writeSources(file: File) {
         file.parentFile?.mkdirs()
         file.writeText(
             "# rslvd package repository (binaries built for /data/data/net.rslvd.debug/files/usr)\n" +
-                "deb [trusted=yes] $REPO_BASE/apt/rslvd-main stable main\n"
+                "deb $REPO_BASE/apt/rslvd-main stable main\n"
         )
     }
 

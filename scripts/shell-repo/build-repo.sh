@@ -4,17 +4,19 @@
 ##
 ## Inputs:
 ##   TERMUX_PACKAGES_DIR  - checkout of termux-packages with
-##                          TERMUX_APP__PACKAGE_NAME="net.rslvd.debug" and the
-##                          apt sources.list pointed at repo.rslvd.net, with
-##                          packages already built into output/ (*.deb).
-##                          Apply termux-tools-rslvd-prefix.patch first: without
-##                          it termux-tools' configure.ac silently falls back to
-##                          /data/data/com.termux paths in login/pkg/profile.d.
+##                          rslvd-packages.patch applied (rslvd-* packages,
+##                          TERMUX_APP__PACKAGE_NAME="net.rslvd.debug", apt
+##                          sources pointed at repo.rslvd.net) and packages
+##                          already built into output/ (*.deb). output/ is
+##                          mirrored 1:1 into the pool, so remove superseded
+##                          .debs from it before running.
 ##   RSLVD_REPO_DIR       - staging dir for the repository (default ./repo-out)
+##   RSLVD_APT_GNUPGHOME  - GnuPG home holding the repo signing key
+##                          (default ~/.rslvd-apt-gpg, never committed)
 ##
 ## Output layout (rsync RSLVD_REPO_DIR to /opt/rslvd-repo on the server):
 ##   apt/rslvd-main/dists/stable/main/binary-{aarch64,all}/Packages(.gz)
-##   apt/rslvd-main/dists/stable/Release
+##   apt/rslvd-main/dists/stable/{Release,Release.gpg,InRelease}
 ##   apt/rslvd-main/pool/main/*.deb
 ##   bootstraps/bootstrap-<arch>.zip(.sha256)
 ##
@@ -33,7 +35,7 @@ command -v dpkg-scanpackages >/dev/null || {
 }
 
 mkdir -p "$POOL_DIR"
-cp -n "$TERMUX_PACKAGES_DIR"/output/*.deb "$POOL_DIR/" 2>/dev/null || true
+rsync -a --delete --exclude 'rslvd-tunnel_*.deb' "$TERMUX_PACKAGES_DIR"/output/ "$POOL_DIR/"
 
 # Build the rslvd-tunnel package (Go client cross-compiled for each arch).
 build_rslvd_tunnel() {
@@ -95,6 +97,25 @@ release_file="$APT_DIR/dists/stable/Release"
         done)
 } > "$release_file"
 
+# Sign Release -> InRelease + Release.gpg. The private key lives outside the
+# repo (RSLVD_APT_GNUPGHOME, default ~/.rslvd-apt-gpg); its public half is
+# packaged in rslvd-keyring (etc/apt/trusted.gpg.d/rslvd-repo.gpg).
+export GNUPGHOME="${RSLVD_APT_GNUPGHOME:-$HOME/.rslvd-apt-gpg}"
+if [ ! -d "$GNUPGHOME" ]; then
+    echo "No apt signing key at $GNUPGHOME (see scripts/shell-repo/README.md)" >&2
+    exit 1
+fi
+SIGN_KEY="${RSLVD_APT_SIGN_KEY:-repo@rslvd.net}"
+rm -f "$release_file.gpg" "$APT_DIR/dists/stable/InRelease"
+gpg --batch --yes --local-user "$SIGN_KEY" --digest-algo SHA256 \
+    --clearsign -o "$APT_DIR/dists/stable/InRelease" "$release_file"
+gpg --batch --yes --local-user "$SIGN_KEY" --digest-algo SHA256 \
+    --detach-sign --armor -o "$release_file.gpg" "$release_file"
+gpg --verify "$APT_DIR/dists/stable/InRelease" >/dev/null 2>&1 || {
+    echo "InRelease signature verification failed" >&2
+    exit 1
+}
+
 # Bootstrap archives generated against this repo. generate-bootstraps.sh needs
 # the repo reachable over HTTP; serve the staging dir briefly on localhost.
 mkdir -p "$RSLVD_REPO_DIR/bootstraps"
@@ -106,7 +127,7 @@ sleep 1
 (cd "$TERMUX_PACKAGES_DIR" &&
     ./scripts/generate-bootstraps.sh \
         --architectures "$(echo "$ARCHES" | tr ' ' ',')" \
-        --add netcat-openbsd,net-tools,dnsutils,nmap,rslvd-tunnel \
+        --add netcat-openbsd,net-tools,dnsutils,nmap,tsu,rslvd-tunnel \
         -r "http://127.0.0.1:8901/apt/rslvd-main")
 
 kill $SERVER_PID 2>/dev/null || true
@@ -118,6 +139,19 @@ for arch in $ARCHES; do
     (cd "$RSLVD_REPO_DIR/bootstraps" &&
         sha256sum "bootstrap-$arch.zip" > "bootstrap-$arch.zip.sha256")
 done
+
+# Snapshot every rslvd modification of termux-packages (rslvd-* package
+# forks, buildorder/bootstrap tweaks, rebrand helper, public repo key) as a
+# single patch so the build is reproducible from this repo alone.
+if git -C "$TERMUX_PACKAGES_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    patch_out="$(cd "$(dirname "$0")" && pwd)/rslvd-packages.patch"
+    (cd "$TERMUX_PACKAGES_DIR" &&
+        grep -qx 'scripts/__pycache__/' .git/info/exclude 2>/dev/null ||
+            echo 'scripts/__pycache__/' >> .git/info/exclude
+        git add -A packages scripts &&
+        git diff --cached --binary -M > "$patch_out")
+    echo "termux-packages patch: $patch_out ($(git -C "$TERMUX_PACKAGES_DIR" rev-parse --short HEAD) base)"
+fi
 
 echo "Repository staged at: $RSLVD_REPO_DIR"
 echo "Deploy: rsync -av --delete '$RSLVD_REPO_DIR/' ubuntu@129.146.61.187:/opt/rslvd-repo/"
